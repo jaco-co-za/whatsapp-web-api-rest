@@ -41,22 +41,21 @@ export class WebhookService {
     this.save(strings);
   }
 
-  send(list: [], data: object): void {
-    const options = {
+  async send(list: [], data: object): Promise<void> {
+    const payload = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     };
+
     const promises = [];
     for (const url of list) {
       if (url !== '') {
-        const send = fetch(url, options);
+        const send = fetch(url, payload);
         promises.push(send);
       }
     }
-    if (is.array(promises)) {
-      Promise.all(promises).catch((e) => console.log(`Webhook: ${e?.message}`));
-    }
+    if (is.array(promises)) await Promise.all(promises);
   }
 
   // Helper method to write strings back to the file

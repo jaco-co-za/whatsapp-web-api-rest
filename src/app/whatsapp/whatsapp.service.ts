@@ -1,13 +1,14 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import NodeCache from '@cacheable/node-cache';
 import { Boom } from '@hapi/boom';
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { delay, is, to } from '@src/tools';
-import makeWASocket, { Browsers, Chat, ConnectionState, Contact, DisconnectReason, downloadMediaMessage, isJidBroadcast, isJidNewsletter, isJidStatusBroadcast, useMultiFileAuthState, WACallEvent, WAPresence } from '@whiskeysockets/baileys';
+import makeWASocket, { Browsers, CacheStore, Chat, ConnectionState, Contact, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, isJidBroadcast, isJidNewsletter, isJidStatusBroadcast, makeCacheableSignalKeyStore, useMultiFileAuthState, WACallEvent, WAPresence } from 'baileys';
+import P from 'pino';
 import { WebhookService } from '../webhook/webhook.service';
 import { IMessage } from './whatsapp.interface';
-const Pino = require('pino');
 const qrcode = require('qrcode-terminal');
 
 declare global {
@@ -40,6 +41,11 @@ export class WhatsappService {
   /**
    * Create connection to WA
    */
+  private reconnectCount = 0;
+  private reconnectTimeout: NodeJS.Timeout | null = null;
+  private maxConnectionAttemps = 4;
+  private pino = P({ level: 'fatal' });
+
   async start(): Promise<void> {
     this.logger.debug('start');
 
@@ -53,19 +59,32 @@ export class WhatsappService {
     }
 
     const { state, saveCreds } = await useMultiFileAuthState(this.credentialsFolderName);
+    const { version } = await fetchLatestBaileysVersion();
+    const msgRetryCounterCache = new NodeCache() as CacheStore;
 
     this.client = makeWASocket({
+      version,
+      logger: this.pino,
+      auth: {
+        creds: state.creds,
+        /** caching makes the store faster to send/recv messages */
+        keys: makeCacheableSignalKeyStore(state.keys, this.pino),
+      },
+      msgRetryCounterCache,
+      generateHighQualityLinkPreview: true,
+      // ignore all broadcast messages -- to receive the same
+      // comment the line below out
+      shouldIgnoreJid: (jid) => isJidBroadcast(jid),
+      // implement to handle retries & poll updates
+      // getMessage
       browser: Browsers.macOS('Desktop'),
-      auth: state,
       syncFullHistory: false,
       markOnlineOnConnect: false,
-      generateHighQualityLinkPreview: true,
       printQRInTerminal: false,
       retryRequestDelayMs: 350,
       maxMsgRetryCount: 4,
       connectTimeoutMs: 20_000,
       keepAliveIntervalMs: 30_000,
-      logger: Pino({ level: 'fatal' }), // https://github.com/pinojs/pino/blob/main/docs/api.md#logger-level
     });
 
     this.client.ev.on('creds.update', saveCreds);
@@ -89,19 +108,35 @@ export class WhatsappService {
 
     // Handle connection close and reconnection logic
     if (connection === 'close') {
-      this.isConnected = false;
+      const error = lastDisconnect?.error as Boom;
+      const statusCode = error?.output?.statusCode;
+      const message = error?.output?.payload?.message || error?.message;
+      text = message;
 
-      const shouldReconnect = (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut && message !== 'QR refs attempts ended' && this.reconnectCount < this.maxConnectionAttemps;
+
       if (shouldReconnect) {
-        text = 'Connection closed, attempting to reconnect...';
-        await this.start();
-      } else text = 'Connection closed, not reconnecting due to logout or invalid credentials';
+        ++this.reconnectCount;
+        const delay = Math.min(1000 * 2 ** (this.reconnectCount - 1), 30000);
 
-      // Log the detailed error from the disconnection
-      if (lastDisconnect?.error) text = `Disconnection error: ${lastDisconnect?.error}`;
+        text = `Reconnecting in ${delay}ms (attempt ${this.reconnectCount})`;
+
+        this.reconnectTimeout = setTimeout(async () => {
+          await this.start();
+        }, delay);
+        return;
+      }
+
+      // Reset on permanent failure
+      this.reconnectCount = 0;
+      this.isConnected = false;
     } else if (connection === 'open') {
       text = 'Connected to WhatsApp!';
-      this.isConnected = true;
+      this.reconnectCount = 0;
+      if (this.reconnectTimeout) {
+        clearTimeout(this.reconnectTimeout);
+        this.reconnectTimeout = null;
+      }
     }
 
     if (text !== '') {
@@ -134,28 +169,34 @@ export class WhatsappService {
    * the update will have type: "notify"
    */
   private onMessageUpsert = async (waMessage: any) => {
-    const messageType = waMessage?.type;
-    //if (waMessage?.type === 'notify')
-    const messages = waMessage.messages;
+    const messages = waMessage?.messages;
     if (is.array(messages)) {
-      for (const conversation of messages) {
-        if (!conversation.key.fromMe && conversation.message) {
-          const from = conversation.key.remoteJid;
-          if (isJidStatusBroadcast(from) || isJidNewsletter(from) || isJidBroadcast(from)) return;
+      //this.logger.log(messages)
+      const webhooks: any = this.webhook.get();
+      if (is.array(webhooks)) {
+        for (const item of messages) {
+          if (!item?.key?.fromMe && item?.message) {
+            const from = to.string(item?.key?.remoteJid);
+            if (isJidStatusBroadcast(from) || isJidNewsletter(from) || isJidBroadcast(from)) return;
+            const pushName = to.string(item?.pushName);
 
-          const list: any = this.webhook.get();
-          if (is.array(list)) {
-            const mimeType = this.getMediaMimeType(conversation);
-            const media = { mimeType, data: '' };
+            // Text
+            let type = 'text';
+            let message = to.string(item?.message?.conversation);
+            if (message === '') message = to.string(item?.message?.extendedTextMessage?.text);
 
+            // Media
+            const mimeType = this.getMediaMimeType(item);
+            const media = { mimeType, caption: '', base64: '' };
             if (mimeType !== '') {
-              const mediaBuffer = await downloadMediaMessage(conversation, 'buffer', {});
-              media.data = mediaBuffer.toString('base64');
+              type = this.getMediaType(item);
+              const mediaBuffer = await downloadMediaMessage(item, 'buffer', {});
+              media.caption = this.getMediaCaption(item);
+              media.base64 = mediaBuffer.toString('base64');
             }
 
-            const payload = { messageType, message: { ...conversation, from }, media };
-            //console.log(JSON.stringify(payload, null, 2));
-            this.webhook.send(list, payload);
+            // Webhook
+            await this.webhook.send(webhooks, { from, pushName, type, message, media });
           }
         }
       }
@@ -378,6 +419,36 @@ export class WhatsappService {
     const { imageMessage, videoMessage, documentMessage, audioMessage, documentWithCaptionMessage } = conversation?.message || {};
 
     return to.string(imageMessage?.mimetype ?? audioMessage?.mimetype ?? videoMessage?.mimetype ?? documentMessage?.mimetype ?? documentWithCaptionMessage?.message?.documentMessage?.mimetype);
+  }
+
+  private getMediaCaption(conversation: any): string {
+    if (!conversation?.message) return '';
+
+    const { imageMessage, videoMessage, documentMessage, audioMessage, documentWithCaptionMessage } = conversation?.message || {};
+
+    return to.string(imageMessage?.caption ?? audioMessage?.caption ?? videoMessage?.caption ?? documentMessage?.caption ?? documentWithCaptionMessage?.message?.documentMessage?.caption);
+  }
+
+  private getMediaType(conversation: any): string {
+    if (!conversation?.message) return '';
+
+    const { imageMessage, videoMessage, documentMessage, audioMessage, documentWithCaptionMessage } = conversation?.message || {};
+
+    if (imageMessage) return 'image';
+    if (videoMessage) return 'video';
+    if (audioMessage) return 'audio';
+    if (documentMessage) return 'document';
+    if (documentWithCaptionMessage?.message?.documentMessage) return 'document';
+
+    // If mimetype is available but message type unknown, derive from MIME prefix
+    const mimetype = imageMessage?.mimetype ?? videoMessage?.mimetype ?? audioMessage?.mimetype ?? documentMessage?.mimetype ?? documentWithCaptionMessage?.message?.documentMessage?.mimetype ?? '';
+
+    if (mimetype.startsWith('image/')) return 'image';
+    if (mimetype.startsWith('video/')) return 'video';
+    if (mimetype.startsWith('audio/')) return 'audio';
+    if (mimetype.startsWith('application/')) return 'document';
+
+    return 'unknown';
   }
 
   // Read existing data from the JSON file

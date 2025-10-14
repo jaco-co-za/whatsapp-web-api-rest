@@ -66,7 +66,7 @@ npm run dev or pnpm dev
     Request Body: `application/json`
 
     `curl -X POST http://localhost:8085/message \
-    -H "Content-Type: application/json" -d {...body}`
+    -H "Content-Type: application/json" -d '{...body}'`
 
     *Body examples*:
 
