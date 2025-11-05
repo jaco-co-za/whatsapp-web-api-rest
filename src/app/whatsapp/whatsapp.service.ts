@@ -47,7 +47,7 @@ export class WhatsappService {
   private pino = P({ level: 'fatal' });
 
   async start(): Promise<void> {
-    this.logger.debug('start');
+    this.logger.debug('Start');
 
     // Check if the client is already connected
     if (this.isConnected && this.client) {
@@ -171,14 +171,13 @@ export class WhatsappService {
   private onMessageUpsert = async (waMessage: any) => {
     const messages = waMessage?.messages;
     if (is.array(messages)) {
-      //this.logger.log(messages)
       const webhooks: any = this.webhook.get();
       if (is.array(webhooks)) {
         for (const item of messages) {
-          if (!item?.key?.fromMe && item?.message) {
+          if (item?.message) {
+            //this.logger.log(item)
             const from = to.string(item?.key?.remoteJid);
             if (isJidStatusBroadcast(from) || isJidNewsletter(from) || isJidBroadcast(from)) return;
-            const pushName = to.string(item?.pushName);
 
             // Text
             let type = 'text';
@@ -196,7 +195,9 @@ export class WhatsappService {
             }
 
             // Webhook
-            await this.webhook.send(webhooks, { from, pushName, type, message, media });
+            const isMe = to.boolean(item?.key?.fromMe);
+            const pushName = to.string(item?.pushName);
+            await this.webhook.send(webhooks, { from, pushName, isMe, type, message, media });
           }
         }
       }

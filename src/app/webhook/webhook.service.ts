@@ -1,11 +1,11 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { is } from '@src/tools';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 
 @Injectable()
 export class WebhookService {
   private readonly filePath: string = path.join(__dirname, '..', 'webhooks.txt');
+  private readonly logger = new Logger('Whatsapp');
 
   constructor() {
     this.ensureFileExists();
@@ -48,14 +48,15 @@ export class WebhookService {
       body: JSON.stringify(data),
     };
 
-    const promises = [];
     for (const url of list) {
       if (url !== '') {
-        const send = fetch(url, payload);
-        promises.push(send);
+        try {
+          await fetch(url, payload);
+        } catch (e) {
+          this.logger.debug(e?.message);
+        }
       }
     }
-    if (is.array(promises)) await Promise.all(promises);
   }
 
   // Helper method to write strings back to the file

@@ -263,7 +263,7 @@ npm run dev or pnpm dev
     ```bash
     curl -X POST http://localhost:8085/webhooks \
     -H "Content-Type: application/json" \
-    -d { "url": "https://your-webhook-url.com" }
+    -d '{ "url": "https://your-webhook-url.com" }'
     ```
     
 <br/>
