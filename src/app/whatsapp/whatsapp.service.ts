@@ -5,10 +5,10 @@ import { Boom } from '@hapi/boom';
 import { Injectable, Logger } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { delay, is, to } from '@src/tools';
-import makeWASocket, { Browsers, CacheStore, Chat, ConnectionState, Contact, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, isJidBroadcast, isJidNewsletter, isJidStatusBroadcast, makeCacheableSignalKeyStore, useMultiFileAuthState, WACallEvent, WAPresence } from 'baileys';
+import makeWASocket, { Browsers, CacheStore, Chat, ConnectionState, Contact, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, isJidBroadcast, isJidNewsletter, isJidStatusBroadcast, makeCacheableSignalKeyStore, useMultiFileAuthState, WACallEvent, WAMessageKey, WAPresence } from 'baileys';
 import P from 'pino';
 import { WebhookService } from '../webhook/webhook.service';
-import { IMessage } from './whatsapp.interface';
+import { IMessage, IReadMessages } from './whatsapp.interface';
 const qrcode = require('qrcode-terminal');
 
 declare global {
@@ -299,6 +299,38 @@ export class WhatsappService {
       this.logger.debug(e);
     }
     return { chatId };
+  }
+
+  /**
+   * Mark one or many messages as read.
+   * Optionally updates presence for the provided/derived jid.
+   */
+  async readMessages(payload: IReadMessages): Promise<{ read: number; keys: WAMessageKey[] }> {
+    const keys = is.array(payload?.keys) ? payload.keys : [];
+    const parsedKeys = keys
+      .map((key) => ({
+        remoteJid: to.string(key?.remoteJid),
+        id: to.string(key?.id),
+        fromMe: to.boolean(key?.fromMe),
+        participant: to.undefined(key?.participant),
+      }))
+      .filter((key) => key.remoteJid !== '' && key.id !== '') as WAMessageKey[];
+
+    if (parsedKeys.length === 0) return { read: 0, keys: [] };
+
+    try {
+      await this.client.readMessages(parsedKeys);
+
+      const presence = payload?.presence as WAPresence;
+      const jid = to.string(payload?.jid || parsedKeys[0]?.remoteJid);
+      if (!is.undefined(presence) && jid !== '') {
+        await this.client.sendPresenceUpdate(presence, jid);
+      }
+    } catch (e) {
+      this.logger.debug(e);
+    }
+
+    return { read: parsedKeys.length, keys: parsedKeys };
   }
 
   /**
