@@ -197,7 +197,23 @@ export class WhatsappService {
             // Webhook
             const isMe = to.boolean(item?.key?.fromMe);
             const pushName = to.string(item?.pushName);
-            await this.webhook.send(webhooks, { from, pushName, isMe, type, message, media });
+            const messageId = to.string(item?.key?.id);
+            const participant = to.string(item?.key?.participant);
+            await this.webhook.send(webhooks, {
+              from,
+              pushName,
+              isMe,
+              type,
+              message,
+              messageId,
+              key: {
+                remoteJid: from,
+                id: messageId,
+                fromMe: isMe,
+                participant: participant === '' ? undefined : participant,
+              },
+              media,
+            });
           }
         }
       }
