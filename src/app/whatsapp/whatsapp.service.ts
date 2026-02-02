@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import NodeCache from '@cacheable/node-cache';
 import { Boom } from '@hapi/boom';
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnModuleInit, ServiceUnavailableException } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { delay, is, to } from '@src/tools';
 import makeWASocket, { Browsers, CacheStore, Chat, ConnectionState, Contact, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, isJidBroadcast, isJidNewsletter, isJidStatusBroadcast, makeCacheableSignalKeyStore, useMultiFileAuthState, WACallEvent, WAMessageKey, WAPresence } from 'baileys';
@@ -143,6 +143,7 @@ export class WhatsappService implements OnModuleInit {
       this.isConnected = false;
     } else if (connection === 'open') {
       text = 'Connected to WhatsApp!';
+      this.isConnected = true;
       this.reconnectCount = 0;
       if (this.reconnectTimeout) {
         clearTimeout(this.reconnectTimeout);
@@ -320,12 +321,23 @@ export class WhatsappService implements OnModuleInit {
    * Simulate  'unavailable' | 'available' | 'composing' | 'recording' | 'paused';
    */
   async sendSimulate(chatId: string, action: WAPresence): Promise<{ chatId: string }> {
-    try {
-      await this.client.sendPresenceUpdate(action, chatId);
-    } catch (e) {
-      this.logger.debug(e);
+    const jid = this.normalizePresenceJid(chatId);
+
+    if (!this.client || !this.isConnected) {
+      throw new ServiceUnavailableException('WhatsApp is not connected');
     }
-    return { chatId };
+
+    if (jid === '' || !jid.includes('@')) {
+      throw new BadRequestException('Invalid chatId/JID for presence update');
+    }
+
+    try {
+      await this.client.sendPresenceUpdate(action, jid);
+      return { chatId: jid };
+    } catch (e) {
+      this.logger.error('Presence update failed', e);
+      throw e;
+    }
   }
 
   /**
@@ -520,6 +532,27 @@ export class WhatsappService implements OnModuleInit {
 
     const files = fs.readdirSync(sessionPath);
     return files.includes('creds.json');
+  }
+
+  private normalizePresenceJid(chatId: string): string {
+    const value = to.string(chatId).trim();
+    if (value === '') return '';
+
+    if (value.endsWith('@c.us')) {
+      const localPart = value.split('@')[0]?.replace(/\D/g, '') || '';
+      return localPart === '' ? '' : `${localPart}@s.whatsapp.net`;
+    }
+
+    if (value.endsWith('@s.whatsapp.net') || value.endsWith('@g.us')) {
+      return value;
+    }
+
+    if (!value.includes('@')) {
+      const number = value.replace(/\D/g, '');
+      return number === '' ? '' : `${number}@s.whatsapp.net`;
+    }
+
+    return value;
   }
 
   // Read existing data from the JSON file
