@@ -103,11 +103,9 @@ export class WhatsappService implements OnModuleInit {
 
     this.client.ev.on('creds.update', saveCreds);
     this.client.ev.on('connection.update', this.onConnectionUpdate);
-    this.client.ev.on('presence.update', this.onPresenceUpdate);
     this.client.ev.on('messages.upsert', this.onMessageUpsert);
     this.client.ev.on('call', this.onCall);
     this.client.ev.on('messaging-history.set', this.onMessagingHistory);
-    this.logger.debug('WA socket event listeners registered: connection.update, presence.update, messages.upsert, call, messaging-history.set');
   }
 
   /**
@@ -116,7 +114,6 @@ export class WhatsappService implements OnModuleInit {
   private onConnectionUpdate = async (connectionState: ConnectionState) => {
     const { connection, lastDisconnect, qr } = connectionState;
     let text = '';
-    this.logger.debug(`connection.update: ${to.string(connection) || 'unknown'}`);
 
     if (is.string(qr) && qr !== '') {
       qrcode.generate(qr, { small: true });
@@ -180,16 +177,6 @@ export class WhatsappService implements OnModuleInit {
     // Save updated chats and contacts to the file
     this.saveDataToFile(updatedChats, updatedContacts);
     //this.logger.debug('Chats and contacts saved to whatsapp_data.json');
-  };
-
-  /**
-   * Presence updates received from WhatsApp.
-   */
-  private onPresenceUpdate = (data: any) => {
-    const id = to.string(data?.id);
-    const participant = to.string(data?.participant);
-    const presences = Object.keys(data?.presences || {});
-    this.logger.debug(`presence.update id=${id} participant=${participant} presences=${presences.join(',')}`);
   };
 
   /**
@@ -345,15 +332,10 @@ export class WhatsappService implements OnModuleInit {
       }
 
       const normalizedJid = this.normalizeJid(chatId);
-      this.logger.debug(`presence.simulate.start chatId=${chatId} jid=${normalizedJid} action=${action} connected=${this.isConnected} hasClient=${Boolean(this.client)}`);
       // Some clients only render typing/recording if we are marked available first.
-      this.logger.debug(`presence.simulate.available jid=${normalizedJid}`);
       await this.client.sendPresenceUpdate('available', normalizedJid);
-      this.logger.debug(`presence.simulate.subscribe jid=${normalizedJid}`);
       await this.client.presenceSubscribe(normalizedJid);
-      this.logger.debug(`presence.simulate.action jid=${normalizedJid} action=${action}`);
       await this.client.sendPresenceUpdate(action, normalizedJid);
-      this.logger.debug(`presence.simulate.done jid=${normalizedJid} action=${action}`);
     } catch (e) {
       this.logger.error(`presence.simulate.error chatId=${chatId} action=${action} message=${to.string((e as any)?.message || e)}`);
       this.logger.debug(e);
@@ -379,18 +361,14 @@ export class WhatsappService implements OnModuleInit {
     if (parsedKeys.length === 0) return { read: 0, keys: [] };
 
     try {
-      this.logger.debug(`messages.read.start count=${parsedKeys.length} presence=${to.string(payload?.presence)} jid=${to.string(payload?.jid)}`);
       await this.client.readMessages(parsedKeys);
-      this.logger.debug(`messages.read.done count=${parsedKeys.length}`);
 
       const presence = payload?.presence as WAPresence;
       const jid = this.normalizeJid(to.string(payload?.jid || parsedKeys[0]?.remoteJid));
       if (!is.undefined(presence) && jid !== '') {
-        this.logger.debug(`messages.read.presence.available-first jid=${jid} action=${presence}`);
         await this.client.sendPresenceUpdate('available', jid);
         await this.client.presenceSubscribe(jid);
         await this.client.sendPresenceUpdate(presence, jid);
-        this.logger.debug(`messages.read.presence.done jid=${jid} action=${presence}`);
       }
     } catch (e) {
       this.logger.error(`messages.read.error message=${to.string((e as any)?.message || e)}`);

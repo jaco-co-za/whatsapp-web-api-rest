@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { to } from '@src/tools';
 
 @Injectable()
 export class WebhookService {
@@ -9,6 +10,7 @@ export class WebhookService {
 
   constructor() {
     this.ensureFileExists();
+    this.loadStartupWebhooks();
   }
 
   // Ensure the file exists or create an empty one
@@ -26,8 +28,12 @@ export class WebhookService {
 
   // Add a new string to the file
   insert(url: string): void {
+    const normalized = to.string(url).trim();
+    if (normalized === '') return;
+
     const data = this.get();
-    data.push(url);
+    if (data.includes(normalized)) return;
+    data.push(normalized);
     this.save(data);
   }
 
@@ -62,5 +68,39 @@ export class WebhookService {
   // Helper method to write strings back to the file
   private save(strings: string[]): void {
     fs.writeFileSync(this.filePath, strings.join('\n'), 'utf8');
+  }
+
+  /**
+   * Loads initial webhooks from environment variables or optional file.
+   * - WEBHOOK_URLS: comma/semicolon/newline separated URLs
+   * - WEBHOOKS_FILE: file path containing URLs (newline or CSV)
+   */
+  private loadStartupWebhooks(): void {
+    try {
+      const fromEnv = this.parseWebhookList(process.env.WEBHOOK_URLS || '');
+      const filePath = to.string(process.env.WEBHOOKS_FILE).trim();
+      const fromFile = filePath !== '' && fs.existsSync(filePath) ? this.parseWebhookList(fs.readFileSync(filePath, 'utf8')) : [];
+      const merged = [...fromEnv, ...fromFile];
+      if (merged.length === 0) return;
+
+      let added = 0;
+      for (const url of merged) {
+        const before = this.get().length;
+        this.insert(url);
+        if (this.get().length > before) ++added;
+      }
+      this.logger.log(`Loaded ${added} webhook(s) from startup config`);
+    } catch (e) {
+      this.logger.error(`Failed to load startup webhooks: ${to.string((e as any)?.message || e)}`);
+    }
+  }
+
+  private parseWebhookList(value: string): string[] {
+    if (!value) return [];
+    const parsed = value
+      .split(/[\n,;]+/g)
+      .map((item) => item.trim())
+      .filter((item) => item !== '');
+    return Array.from(new Set(parsed));
   }
 }

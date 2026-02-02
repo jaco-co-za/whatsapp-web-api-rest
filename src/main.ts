@@ -39,7 +39,6 @@ import { AppModule } from '@src/app.module';
   });
 
   logger.log(`Booting whatsapp-web-api-rest version=${packageVersion} imageTag=${imageTag} sha=${buildSha} pid=${process.pid} node=${process.version}`);
-  logger.debug(`Config appPort=${port} cwd=${process.cwd()}`);
 
   // Ready
   await app.listen(port, '0.0.0.0', () => {

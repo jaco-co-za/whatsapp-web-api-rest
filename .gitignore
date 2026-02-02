@@ -2,6 +2,9 @@ dist
 test
 yarn.lock
 auth_info
+.env
+.env.*
+!.env.example
 
 # Logs
 logs

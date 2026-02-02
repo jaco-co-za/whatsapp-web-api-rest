@@ -25,6 +25,19 @@
 docker run --restart unless-stopped -dp 8085:8085 --name whatsapp-web-api-rest blakegt/whatsapp-web-api-rest:latest
 ```
 
+Auto-load webhook URLs at startup (optional):
+
+- `WEBHOOK_URLS`: webhook URLs separated by comma, semicolon, or newline
+- `WEBHOOKS_FILE`: path to a file with webhook URLs (newline or CSV)
+
+Example `.env`:
+
+```env
+WEBHOOK_URLS=http://192.168.55.73:3350/incomingwa,http://127.0.0.1:3350/incomingwa
+# Optional:
+# WEBHOOKS_FILE=/data/webhooks.csv
+```
+
 <br/>
 
 ## 👨🏻‍💻 Dev mode
