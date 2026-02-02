@@ -90,7 +90,8 @@ export class WhatsappService implements OnModuleInit {
       // getMessage
       browser: Browsers.macOS('Desktop'),
       syncFullHistory: false,
-      markOnlineOnConnect: false,
+      // Keep the session online so presence updates like "composing" are delivered.
+      markOnlineOnConnect: true,
       printQRInTerminal: false,
       retryRequestDelayMs: 350,
       maxMsgRetryCount: 4,
@@ -321,6 +322,9 @@ export class WhatsappService implements OnModuleInit {
    */
   async sendSimulate(chatId: string, action: WAPresence): Promise<{ chatId: string }> {
     try {
+      // Some clients only render typing/recording if we are marked available first.
+      await this.client.sendPresenceUpdate('available', chatId);
+      await this.client.presenceSubscribe(chatId);
       await this.client.sendPresenceUpdate(action, chatId);
     } catch (e) {
       this.logger.debug(e);
