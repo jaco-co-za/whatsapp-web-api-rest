@@ -54,7 +54,6 @@ export class WhatsappService implements OnModuleInit {
    */
   private reconnectCount = 0;
   private reconnectTimeout: NodeJS.Timeout | null = null;
-  private maxConnectionAttemps = 4;
   private pino = P({ level: 'fatal' });
 
   async start(): Promise<void> {
@@ -127,7 +126,7 @@ export class WhatsappService implements OnModuleInit {
       const message = error?.output?.payload?.message || error?.message;
       text = message;
 
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut && message !== 'QR refs attempts ended' && this.reconnectCount < this.maxConnectionAttemps;
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut && message !== 'QR refs attempts ended';
 
       if (shouldReconnect) {
         ++this.reconnectCount;
