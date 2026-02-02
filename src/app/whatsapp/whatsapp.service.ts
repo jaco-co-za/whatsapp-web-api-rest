@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import NodeCache from '@cacheable/node-cache';
 import { Boom } from '@hapi/boom';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { delay, is, to } from '@src/tools';
 import makeWASocket, { Browsers, CacheStore, Chat, ConnectionState, Contact, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, isJidBroadcast, isJidNewsletter, isJidStatusBroadcast, makeCacheableSignalKeyStore, useMultiFileAuthState, WACallEvent, WAMessageKey, WAPresence } from 'baileys';
@@ -26,7 +26,7 @@ declare global {
  */
 
 @Injectable()
-export class WhatsappService {
+export class WhatsappService implements OnModuleInit {
   private client: any = null;
   private isConnected = false;
   private readonly filePath: string = path.join(__dirname, '..', 'whatsapp_data.json');
@@ -37,6 +37,17 @@ export class WhatsappService {
     private eventEmitter: EventEmitter2,
     private webhook: WebhookService,
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    if (!this.hasSavedSession()) return;
+
+    this.logger.debug('Saved WhatsApp session found, starting automatically...');
+    try {
+      await this.start();
+    } catch (e) {
+      this.logger.error('Failed to auto start saved WhatsApp session', e);
+    }
+  }
 
   /**
    * Create connection to WA
@@ -498,6 +509,17 @@ export class WhatsappService {
     if (mimetype.startsWith('application/')) return 'document';
 
     return 'unknown';
+  }
+
+  private hasSavedSession(): boolean {
+    const sessionPath = path.resolve(this.credentialsFolderName);
+    if (!fs.existsSync(sessionPath)) return false;
+
+    const stats = fs.statSync(sessionPath);
+    if (!stats.isDirectory()) return false;
+
+    const files = fs.readdirSync(sessionPath);
+    return files.includes('creds.json');
   }
 
   // Read existing data from the JSON file
