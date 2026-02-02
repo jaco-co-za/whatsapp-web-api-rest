@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Res, Sse } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Res, Sse } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { ApiConsumes, ApiProduces, ApiTags } from '@nestjs/swagger';
 import { Chat, Contact, WAPresence } from 'baileys';
@@ -35,8 +35,10 @@ export class WhatsappController {
   @Post('simulate')
   @ApiProduces('application/json')
   @ApiConsumes('application/json')
-  async controllerPostSimulate(@Body() payload: { chatId: string; action: WAPresence }): Promise<any> {
-    const { chatId, action } = payload;
+  async controllerPostSimulate(@Body() payload: { chatId: string; action?: WAPresence; presence?: WAPresence }): Promise<any> {
+    const chatId = payload?.chatId;
+    const action = payload?.action ?? payload?.presence;
+    if (!chatId || !action) throw new BadRequestException('chatId and action are required. You can also use "presence" as an alias for action.');
     return await this.whatsapp.sendSimulate(chatId, action);
   }
 

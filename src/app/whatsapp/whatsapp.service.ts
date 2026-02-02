@@ -338,6 +338,12 @@ export class WhatsappService implements OnModuleInit {
    */
   async sendSimulate(chatId: string, action: WAPresence): Promise<{ chatId: string }> {
     try {
+      const allowedActions: WAPresence[] = ['unavailable', 'available', 'composing', 'recording', 'paused'];
+      if (!allowedActions.includes(action)) {
+        this.logger.error(`presence.simulate.invalid-action chatId=${chatId} action=${to.string(action)}`);
+        return { chatId };
+      }
+
       const normalizedJid = this.normalizeJid(chatId);
       this.logger.debug(`presence.simulate.start chatId=${chatId} jid=${normalizedJid} action=${action} connected=${this.isConnected} hasClient=${Boolean(this.client)}`);
       // Some clients only render typing/recording if we are marked available first.
