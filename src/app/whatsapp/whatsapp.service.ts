@@ -112,6 +112,7 @@ export class WhatsappService implements OnModuleInit {
   private onConnectionUpdate = async (connectionState: ConnectionState) => {
     const { connection, lastDisconnect, qr } = connectionState;
     let text = '';
+    this.logger.debug(`connection.update: ${to.string(connection) || 'unknown'}`);
 
     if (is.string(qr) && qr !== '') {
       qrcode.generate(qr, { small: true });
@@ -145,6 +146,7 @@ export class WhatsappService implements OnModuleInit {
     } else if (connection === 'open') {
       text = 'Connected to WhatsApp!';
       this.reconnectCount = 0;
+      this.isConnected = true;
       if (this.reconnectTimeout) {
         clearTimeout(this.reconnectTimeout);
         this.reconnectTimeout = null;
@@ -322,11 +324,17 @@ export class WhatsappService implements OnModuleInit {
    */
   async sendSimulate(chatId: string, action: WAPresence): Promise<{ chatId: string }> {
     try {
+      this.logger.debug(`presence.simulate.start chatId=${chatId} action=${action} connected=${this.isConnected} hasClient=${Boolean(this.client)}`);
       // Some clients only render typing/recording if we are marked available first.
+      this.logger.debug(`presence.simulate.available chatId=${chatId}`);
       await this.client.sendPresenceUpdate('available', chatId);
+      this.logger.debug(`presence.simulate.subscribe chatId=${chatId}`);
       await this.client.presenceSubscribe(chatId);
+      this.logger.debug(`presence.simulate.action chatId=${chatId} action=${action}`);
       await this.client.sendPresenceUpdate(action, chatId);
+      this.logger.debug(`presence.simulate.done chatId=${chatId} action=${action}`);
     } catch (e) {
+      this.logger.error(`presence.simulate.error chatId=${chatId} action=${action} message=${to.string((e as any)?.message || e)}`);
       this.logger.debug(e);
     }
     return { chatId };
@@ -350,14 +358,21 @@ export class WhatsappService implements OnModuleInit {
     if (parsedKeys.length === 0) return { read: 0, keys: [] };
 
     try {
+      this.logger.debug(`messages.read.start count=${parsedKeys.length} presence=${to.string(payload?.presence)} jid=${to.string(payload?.jid)}`);
       await this.client.readMessages(parsedKeys);
+      this.logger.debug(`messages.read.done count=${parsedKeys.length}`);
 
       const presence = payload?.presence as WAPresence;
       const jid = to.string(payload?.jid || parsedKeys[0]?.remoteJid);
       if (!is.undefined(presence) && jid !== '') {
+        this.logger.debug(`messages.read.presence.available-first jid=${jid} action=${presence}`);
+        await this.client.sendPresenceUpdate('available', jid);
+        await this.client.presenceSubscribe(jid);
         await this.client.sendPresenceUpdate(presence, jid);
+        this.logger.debug(`messages.read.presence.done jid=${jid} action=${presence}`);
       }
     } catch (e) {
+      this.logger.error(`messages.read.error message=${to.string((e as any)?.message || e)}`);
       this.logger.debug(e);
     }
 
