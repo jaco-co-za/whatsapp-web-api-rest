@@ -56,14 +56,10 @@ export class WebhookService {
 
     for (const url of list) {
       if (url !== '') {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
         try {
-          await fetch(url, { ...payload, signal: controller.signal });
+          await fetch(url, payload);
         } catch (e) {
           this.logger.debug(e?.message);
-        } finally {
-          clearTimeout(timeout);
         }
       }
     }
