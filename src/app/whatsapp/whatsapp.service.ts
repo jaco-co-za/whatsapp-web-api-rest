@@ -59,6 +59,7 @@ export class WhatsappService implements OnModuleInit {
 
   async start(): Promise<void> {
     this.logger.debug('Start');
+    this.logger.log(`Startup info connected=${this.isConnected} hasClient=${Boolean(this.client)} markOnlineOnConnect=true`);
 
     // Check if the client is already connected
     if (this.isConnected && this.client) {
@@ -71,6 +72,7 @@ export class WhatsappService implements OnModuleInit {
 
     const { state, saveCreds } = await useMultiFileAuthState(this.credentialsFolderName);
     const { version } = await fetchLatestBaileysVersion();
+    this.logger.log(`Using Baileys WA version ${version.join('.')}`);
     const msgRetryCounterCache = new NodeCache() as CacheStore;
 
     this.client = makeWASocket({
@@ -105,6 +107,7 @@ export class WhatsappService implements OnModuleInit {
     this.client.ev.on('messages.upsert', this.onMessageUpsert);
     this.client.ev.on('call', this.onCall);
     this.client.ev.on('messaging-history.set', this.onMessagingHistory);
+    this.logger.debug('WA socket event listeners registered: connection.update, presence.update, messages.upsert, call, messaging-history.set');
   }
 
   /**
