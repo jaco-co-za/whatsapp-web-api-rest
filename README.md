@@ -181,11 +181,11 @@ npm run dev or pnpm dev
 - `POST` /simulate
 
     **Simulate an action (presence)**
-  - **chatId**: The chat number ID. Supports `@s.whatsapp.net`, `@g.us`, and `@c.us` (auto-normalized to `@s.whatsapp.net`)
+  - **chatId**: The chat number ID
   - **action**: The action to simulate: unavailable | available | composing | recording | paused
     ```json
     {
-        "chatId": "5215512345678@s.whatsapp.net",
+        "chatId": "5215512345678@c.us",
         "action": "composing",
     }
     ```
