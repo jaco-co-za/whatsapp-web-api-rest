@@ -31,6 +31,7 @@ export class WhatsappService implements OnModuleInit {
   private isConnected = false;
   private readonly filePath: string = path.join(__dirname, '..', 'whatsapp_data.json');
   private readonly credentialsFolderName = 'auth_info';
+  private readonly maxWebhookMessageAgeMs = 60_000;
   private readonly logger = new Logger('Whatsapp');
 
   constructor(
@@ -193,6 +194,11 @@ export class WhatsappService implements OnModuleInit {
             //this.logger.log(item)
             const from = to.string(item?.key?.remoteJid);
             if (isJidStatusBroadcast(from) || isJidNewsletter(from) || isJidBroadcast(from)) return;
+            if (this.isMessageOlderThanMaxAge(item)) {
+              const messageId = to.string(item?.key?.id);
+              this.logger.debug(`Skipping stale message id=${messageId}`);
+              continue;
+            }
 
             // Text
             let type = 'text';
@@ -544,6 +550,34 @@ export class WhatsappService implements OnModuleInit {
 
     const files = fs.readdirSync(sessionPath);
     return files.includes('creds.json');
+  }
+
+  private isMessageOlderThanMaxAge(message: any): boolean {
+    const timestampMs = this.getMessageTimestampMs(message?.messageTimestamp);
+    if (timestampMs === 0) return false;
+    return Date.now() - timestampMs > this.maxWebhookMessageAgeMs;
+  }
+
+  private getMessageTimestampMs(value: any): number {
+    if (is.undefined(value) || value === null) return 0;
+
+    if (is.number(value)) return value > 1_000_000_000_000 ? value : value * 1000;
+
+    if (is.string(value)) {
+      const asNumber = Number(value);
+      if (!Number.isFinite(asNumber) || asNumber <= 0) return 0;
+      return asNumber > 1_000_000_000_000 ? asNumber : asNumber * 1000;
+    }
+
+    if (is.object(value)) {
+      const fromToNumber = value?.toNumber?.();
+      if (is.number(fromToNumber) && Number.isFinite(fromToNumber)) return fromToNumber > 1_000_000_000_000 ? fromToNumber : fromToNumber * 1000;
+
+      const fromToString = Number(value?.toString?.());
+      if (Number.isFinite(fromToString) && fromToString > 0) return fromToString > 1_000_000_000_000 ? fromToString : fromToString * 1000;
+    }
+
+    return 0;
   }
 
   // Read existing data from the JSON file
