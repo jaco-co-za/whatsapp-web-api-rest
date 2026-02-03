@@ -453,6 +453,49 @@ export class WhatsappService implements OnModuleInit {
     }
   }
 
+  getConnectionHealth(): {
+    alive: boolean;
+    connected: boolean;
+    hasClient: boolean;
+    reconnectScheduled: boolean;
+    wsReadyState: number | null;
+  } {
+    const hasClient = Boolean(this.client);
+    const wsReadyStateRaw = this.client?.ws?.readyState;
+    const wsReadyState = is.number(wsReadyStateRaw) ? wsReadyStateRaw : null;
+    const wsOpen = wsReadyState === null ? this.isConnected : wsReadyState === 1;
+    const alive = this.isConnected && hasClient && wsOpen;
+
+    return {
+      alive,
+      connected: this.isConnected,
+      hasClient,
+      reconnectScheduled: Boolean(this.reconnectTimeout),
+      wsReadyState,
+    };
+  }
+
+  async ensureConnected(): Promise<{
+    alive: boolean;
+    connected: boolean;
+    hasClient: boolean;
+    reconnectScheduled: boolean;
+    wsReadyState: number | null;
+    action: string;
+  }> {
+    const health = this.getConnectionHealth();
+    if (health.alive) return { ...health, action: 'already_alive' };
+    if (health.reconnectScheduled) return { ...health, action: 'reconnect_scheduled' };
+
+    try {
+      await this.start();
+      return { ...this.getConnectionHealth(), action: 'start_called' };
+    } catch (e) {
+      this.logger.error('Failed to ensure WhatsApp connection', e);
+      return { ...this.getConnectionHealth(), action: 'start_failed' };
+    }
+  }
+
   /**
    * Start html page for event emitter
    */

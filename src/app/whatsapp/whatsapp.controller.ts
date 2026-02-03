@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Res, Sse } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Delete, Get, Param, Post, Query, Res, Sse } from '@nestjs/common';
 import { OnEvent } from '@nestjs/event-emitter';
 import { ApiConsumes, ApiProduces, ApiTags } from '@nestjs/swagger';
 import { Chat, Contact, WAPresence } from 'baileys';
@@ -83,6 +83,14 @@ export class WhatsappController {
   @ApiProduces('application/json')
   async controllerGetLogout(): Promise<any> {
     return await this.whatsapp.logout();
+  }
+
+  @Get('health/whatsapp')
+  @ApiProduces('application/json')
+  async controllerGetWhatsappHealth(@Query('recover') recover?: string): Promise<object> {
+    const shouldRecover = (recover || '').toLowerCase() === 'true' || recover === '1';
+    if (shouldRecover) return await this.whatsapp.ensureConnected();
+    return this.whatsapp.getConnectionHealth();
   }
 
   @Get('webhooks')

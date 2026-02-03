@@ -280,6 +280,35 @@ npm run dev or pnpm dev
 
 <br/>
 
+- `GET` /health/whatsapp
+
+    **Get current WhatsApp connection health**
+
+    `curl http://localhost:8085/health/whatsapp`
+
+    Returns:
+    - `alive`: true when connected and socket is open
+    - `connected`: current internal connection flag
+    - `hasClient`: whether a Baileys client instance exists
+    - `reconnectScheduled`: whether reconnect timer is pending
+    - `wsReadyState`: websocket ready state (if available)
+
+<br/>
+
+- `GET` /health/whatsapp?recover=true
+
+    **Check health and try to reconnect if not alive**
+
+    `curl http://localhost:8085/health/whatsapp?recover=true`
+
+    Also returns `action`:
+    - `already_alive`
+    - `reconnect_scheduled`
+    - `start_called`
+    - `start_failed`
+
+<br/>
+
 ## 🛠️ Manage webhooks
 
 - `GET`  /webhooks
