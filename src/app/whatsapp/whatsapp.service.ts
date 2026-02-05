@@ -246,6 +246,18 @@ export class WhatsappService implements OnModuleInit {
                 try {
                   await this.client.sendPresenceUpdate('composing', normalizedJid);
                   const responses = await this.webhook.sendWithResponse(webhooks, webhookPayload);
+                  try {
+                    await this.client.readMessages([
+                      {
+                        remoteJid: to.string(item?.key?.remoteJid),
+                        id: to.string(item?.key?.id),
+                        fromMe: false,
+                        participant: to.undefined(item?.key?.participant),
+                      },
+                    ]);
+                  } catch (readError) {
+                    this.logger.debug(readError);
+                  }
                   let replyMsg = '';
                   for (const response of responses) {
                     const candidate = to.string(response?.response?.msg);
