@@ -247,7 +247,7 @@ export class WhatsappService implements OnModuleInit {
                   const responses = await this.webhook.sendWithResponse(webhooks, webhookPayload);
                   let replyMsg = '';
                   for (const response of responses) {
-                    const candidate = to.string(response?.response?.message);
+                    const candidate = to.string(response?.response?.msg);
                     if (candidate !== '') {
                       replyMsg = candidate;
                       break;
