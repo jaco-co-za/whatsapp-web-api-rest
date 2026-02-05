@@ -33,6 +33,7 @@ export class WhatsappService implements OnModuleInit {
   private readonly credentialsFolderName = 'auth_info';
   private readonly maxWebhookMessageAgeMs = 60_000;
   private readonly logger = new Logger('Whatsapp');
+  private messageQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private eventEmitter: EventEmitter2,
@@ -187,57 +188,90 @@ export class WhatsappService implements OnModuleInit {
   private onMessageUpsert = async (waMessage: any) => {
     const messages = waMessage?.messages;
     if (is.array(messages)) {
-      const webhooks: any = this.webhook.get();
-      if (is.array(webhooks)) {
-        for (const item of messages) {
-          if (item?.message) {
-            //this.logger.log(item)
-            const from = to.string(item?.key?.remoteJid);
-            if (isJidStatusBroadcast(from) || isJidNewsletter(from) || isJidBroadcast(from)) return;
-            if (this.isMessageOlderThanMaxAge(item)) {
-              const messageId = to.string(item?.key?.id);
-              this.logger.debug(`Skipping stale message id=${messageId}`);
-              continue;
+      this.messageQueue = this.messageQueue
+        .then(async () => {
+          const webhooks: any = this.webhook.get();
+          if (is.array(webhooks)) {
+            for (const item of messages) {
+              if (item?.message) {
+                //this.logger.log(item)
+                const from = to.string(item?.key?.remoteJid);
+                if (isJidStatusBroadcast(from) || isJidNewsletter(from) || isJidBroadcast(from)) return;
+                if (this.isMessageOlderThanMaxAge(item)) {
+                  const messageId = to.string(item?.key?.id);
+                  this.logger.debug(`Skipping stale message id=${messageId}`);
+                  continue;
+                }
+
+                // Text
+                let type = 'text';
+                let message = to.string(item?.message?.conversation);
+                if (message === '') message = to.string(item?.message?.extendedTextMessage?.text);
+
+                // Media
+                const mimeType = this.getMediaMimeType(item);
+                const media = { mimeType, caption: '', base64: '' };
+                if (mimeType !== '') {
+                  type = this.getMediaType(item);
+                  const mediaBuffer = await downloadMediaMessage(item, 'buffer', {});
+                  media.caption = this.getMediaCaption(item);
+                  media.base64 = mediaBuffer.toString('base64');
+                }
+
+                // Webhook
+                const isMe = to.boolean(item?.key?.fromMe);
+                const pushName = to.string(item?.pushName);
+                const messageId = to.string(item?.key?.id);
+                const participant = to.string(item?.key?.participant);
+                const replyId = this.getReplyId(item);
+                const webhookPayload = {
+                  from,
+                  pushName,
+                  isMe,
+                  type,
+                  message,
+                  messageId,
+                  replyId: replyId === '' ? undefined : replyId,
+                  key: {
+                    remoteJid: from,
+                    id: messageId,
+                    fromMe: isMe,
+                    participant: participant === '' ? undefined : participant,
+                  },
+                  media,
+                };
+                const normalizedJid = this.normalizeJid(from);
+                const webhookStart = Date.now();
+                try {
+                  await this.client.sendPresenceUpdate('composing', normalizedJid);
+                  const responses = await this.webhook.sendWithResponse(webhooks, webhookPayload);
+                  let replyMsg = '';
+                  for (const response of responses) {
+                    const candidate = to.string(response?.response?.message);
+                    if (candidate !== '') {
+                      replyMsg = candidate;
+                      break;
+                    }
+                  }
+
+                  const elapsed = Date.now() - webhookStart;
+                  if (elapsed < 1000) await delay(1000 - elapsed);
+                  await this.client.sendPresenceUpdate('paused', normalizedJid);
+                  await delay(250);
+
+                  if (replyMsg !== '') {
+                    await this.sendMessage({ chatId: from, text: replyMsg, options: {} });
+                  }
+                } catch (e) {
+                  this.logger.debug(e);
+                }
+              }
             }
-
-            // Text
-            let type = 'text';
-            let message = to.string(item?.message?.conversation);
-            if (message === '') message = to.string(item?.message?.extendedTextMessage?.text);
-
-            // Media
-            const mimeType = this.getMediaMimeType(item);
-            const media = { mimeType, caption: '', base64: '' };
-            if (mimeType !== '') {
-              type = this.getMediaType(item);
-              const mediaBuffer = await downloadMediaMessage(item, 'buffer', {});
-              media.caption = this.getMediaCaption(item);
-              media.base64 = mediaBuffer.toString('base64');
-            }
-
-            // Webhook
-            const isMe = to.boolean(item?.key?.fromMe);
-            const pushName = to.string(item?.pushName);
-            const messageId = to.string(item?.key?.id);
-            const participant = to.string(item?.key?.participant);
-            await this.webhook.send(webhooks, {
-              from,
-              pushName,
-              isMe,
-              type,
-              message,
-              messageId,
-              key: {
-                remoteJid: from,
-                id: messageId,
-                fromMe: isMe,
-                participant: participant === '' ? undefined : participant,
-              },
-              media,
-            });
           }
-        }
-      }
+        })
+        .catch((e) => {
+          this.logger.debug(e);
+        });
     }
   };
 
@@ -576,6 +610,19 @@ export class WhatsappService implements OnModuleInit {
     if (mimetype.startsWith('application/')) return 'document';
 
     return 'unknown';
+  }
+
+  private getReplyId(conversation: any): string {
+    if (!conversation?.message) return '';
+    const contextInfo =
+      conversation?.message?.extendedTextMessage?.contextInfo ||
+      conversation?.message?.imageMessage?.contextInfo ||
+      conversation?.message?.videoMessage?.contextInfo ||
+      conversation?.message?.documentMessage?.contextInfo ||
+      conversation?.message?.audioMessage?.contextInfo ||
+      conversation?.message?.stickerMessage?.contextInfo;
+
+    return to.string(contextInfo?.stanzaId);
   }
 
   // Baileys expects user chats as @s.whatsapp.net for presence operations.

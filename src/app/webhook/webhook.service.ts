@@ -65,6 +65,41 @@ export class WebhookService {
     }
   }
 
+  async sendWithResponse(list: string[], data: object): Promise<Array<{ url: string; ok: boolean; status: number | null; response: any }>> {
+    const payload = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    };
+
+    const results: Array<{ url: string; ok: boolean; status: number | null; response: any }> = [];
+
+    for (const url of list) {
+      if (url === '') continue;
+      try {
+        const res = await fetch(url, payload);
+        const contentType = to.string(res.headers.get('content-type'));
+        let response: any = null;
+        if (contentType.includes('application/json')) {
+          response = await res.json();
+        } else {
+          const text = await res.text();
+          try {
+            response = JSON.parse(text);
+          } catch {
+            response = text;
+          }
+        }
+        results.push({ url, ok: res.ok, status: res.status, response });
+      } catch (e) {
+        this.logger.debug(e?.message);
+        results.push({ url, ok: false, status: null, response: null });
+      }
+    }
+
+    return results;
+  }
+
   // Helper method to write strings back to the file
   private save(strings: string[]): void {
     fs.writeFileSync(this.filePath, strings.join('\n'), 'utf8');
