@@ -197,6 +197,8 @@ export class WhatsappService implements OnModuleInit {
                 //this.logger.log(item)
                 const from = to.string(item?.key?.remoteJid);
                 if (isJidStatusBroadcast(from) || isJidNewsletter(from) || isJidBroadcast(from)) return;
+                const isMe = to.boolean(item?.key?.fromMe);
+                if (isMe) continue;
                 if (this.isMessageOlderThanMaxAge(item)) {
                   const messageId = to.string(item?.key?.id);
                   this.logger.debug(`Skipping stale message id=${messageId}`);
@@ -219,7 +221,6 @@ export class WhatsappService implements OnModuleInit {
                 }
 
                 // Webhook
-                const isMe = to.boolean(item?.key?.fromMe);
                 const pushName = to.string(item?.pushName);
                 const messageId = to.string(item?.key?.id);
                 const participant = to.string(item?.key?.participant);
