@@ -34,11 +34,14 @@ export class WhatsappService implements OnModuleInit {
   private readonly maxWebhookMessageAgeMs = 60_000;
   private readonly logger = new Logger('Whatsapp');
   private messageQueue: Promise<void> = Promise.resolve();
+  private readonly authorizedWhatsAppIds: Set<string>;
 
   constructor(
     private eventEmitter: EventEmitter2,
     private webhook: WebhookService,
-  ) {}
+  ) {
+    this.authorizedWhatsAppIds = this.parseAuthorizedWhatsAppIds(process.env.AUTHORIZED_WHATSAPP_IDS || '');
+  }
 
   async onModuleInit(): Promise<void> {
     if (!this.hasSavedSession()) return;
@@ -199,6 +202,7 @@ export class WhatsappService implements OnModuleInit {
                 if (isJidStatusBroadcast(from) || isJidNewsletter(from) || isJidBroadcast(from)) return;
                 const isMe = to.boolean(item?.key?.fromMe);
                 if (isMe) continue;
+                if (!this.isAuthorizedMessage(item)) continue;
                 if (this.isMessageOlderThanMaxAge(item)) {
                   const messageId = to.string(item?.key?.id);
                   this.logger.debug(`Skipping stale message id=${messageId}`);
@@ -659,6 +663,24 @@ export class WhatsappService implements OnModuleInit {
     const timestampMs = this.getMessageTimestampMs(message?.messageTimestamp);
     if (timestampMs === 0) return false;
     return Date.now() - timestampMs > this.maxWebhookMessageAgeMs;
+  }
+
+  private parseAuthorizedWhatsAppIds(raw: string): Set<string> {
+    const items = raw
+      .split(/[\n,;]+/)
+      .map((value) => value.trim())
+      .filter((value) => value !== '')
+      .map((value) => value.toLowerCase());
+    return new Set(items);
+  }
+
+  private isAuthorizedMessage(message: any): boolean {
+    if (this.authorizedWhatsAppIds.size === 0) return true;
+    const from = to.string(message?.key?.remoteJid).toLowerCase();
+    const participant = to.string(message?.key?.participant).toLowerCase();
+    if (from !== '' && this.authorizedWhatsAppIds.has(from)) return true;
+    if (participant !== '' && this.authorizedWhatsAppIds.has(participant)) return true;
+    return false;
   }
 
   private getMessageTimestampMs(value: any): number {
