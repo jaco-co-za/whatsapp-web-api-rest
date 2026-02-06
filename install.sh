@@ -10,10 +10,12 @@ IMAGE="${IMAGE:-jaco/whatsapp-web-api-rest:add-converse-status}"
 CONTAINER_NAME="${CONTAINER_NAME:-whatsapp}"
 AUTH_VOLUME="${AUTH_VOLUME:-whatsapp_auth}"
 APP_PORT="${APP_PORT:-8085}"
-ENV_FILE="${ENV_FILE:-/home/jvdwalt/whatsapp.env}"
+ENV_FILE="${ENV_FILE:-$HOME/whatsapp-web-api-rest/.env}"
+REPO_ENV_FILE="${REPO_ENV_FILE:-$HOME/whatsapp-web-api-rest/.env}"
 WEBHOOK_URLS="${WEBHOOK_URLS:-http://192.168.55.73:3350/incomingwa}"
 IMAGE_TAG="${IMAGE_TAG:-local}"
 BUILD_SHA="${BUILD_SHA:-dev}"
+AUTHORIZED_WHATSAPP_IDS="${AUTHORIZED_WHATSAPP_IDS:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -40,6 +42,41 @@ ensure_env_value() {
   printf "%s=%s\n" "$key" "$value" >> "$file"
 }
 
+set_env_value() {
+  local key="$1"
+  local value="$2"
+  local file="$3"
+
+  local escaped_value="${value//\\/\\\\}"
+  escaped_value="${escaped_value//|/\\|}"
+
+  if grep -qE "^${key}=" "$file"; then
+    sed -i "s|^${key}=.*|${key}=${escaped_value}|" "$file"
+  else
+    printf "%s=%s\n" "$key" "$escaped_value" >> "$file"
+  fi
+}
+
+inject_env_file() {
+  local src_file="$1"
+  local dest_file="$2"
+
+  if [[ ! -f "$src_file" ]]; then
+    return 0
+  fi
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" ]] && continue
+    [[ "$line" =~ ^[[:space:]]*# ]] && continue
+    line="${line#export }"
+    if [[ "$line" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
+      local key="${line%%=*}"
+      local value="${line#*=}"
+      set_env_value "$key" "$value" "$dest_file"
+    fi
+  done < "$src_file"
+}
+
 ENV_DIR="$(dirname "$ENV_FILE")"
 mkdir -p "$ENV_DIR"
 
@@ -57,6 +94,7 @@ WEBHOOK_URLS=$WEBHOOK_URLS
 # Optional startup metadata log fields
 IMAGE_TAG=$IMAGE_TAG
 BUILD_SHA=$BUILD_SHA
+AUTHORIZED_WHATSAPP_IDS=$AUTHORIZED_WHATSAPP_IDS
 EOF
   echo "==> Created default env file at '$ENV_FILE'"
 else
@@ -64,7 +102,13 @@ else
   ensure_env_value "WEBHOOK_URLS" "$WEBHOOK_URLS" "$ENV_FILE"
   ensure_env_value "IMAGE_TAG" "$IMAGE_TAG" "$ENV_FILE"
   ensure_env_value "BUILD_SHA" "$BUILD_SHA" "$ENV_FILE"
+  ensure_env_value "AUTHORIZED_WHATSAPP_IDS" "$AUTHORIZED_WHATSAPP_IDS" "$ENV_FILE"
   echo "==> Reused env file at '$ENV_FILE' (added missing defaults only)"
+fi
+
+inject_env_file "$REPO_ENV_FILE" "$ENV_FILE"
+if [[ -f "$REPO_ENV_FILE" ]]; then
+  echo "==> Injected values from '$REPO_ENV_FILE' into '$ENV_FILE'"
 fi
 
 echo "==> Syncing branch '$BRANCH' from '$REMOTE'..."
