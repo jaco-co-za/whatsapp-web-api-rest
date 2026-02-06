@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import NodeCache from '@cacheable/node-cache';
 import { Boom } from '@hapi/boom';
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { delay, is, to } from '@src/tools';
 import makeWASocket, { Browsers, CacheStore, Chat, ConnectionState, Contact, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, isJidBroadcast, isJidNewsletter, isJidStatusBroadcast, makeCacheableSignalKeyStore, useMultiFileAuthState, WACallEvent, WAMessageKey, WAPresence } from 'baileys';
@@ -26,7 +26,7 @@ declare global {
  */
 
 @Injectable()
-export class WhatsappService implements OnModuleInit {
+export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   private client: any = null;
   private isConnected = false;
   private readonly filePath: string = path.join(__dirname, '..', 'whatsapp_data.json');
@@ -52,6 +52,21 @@ export class WhatsappService implements OnModuleInit {
     } catch (e) {
       this.logger.error('Failed to auto start saved WhatsApp session', e);
     }
+
+    if (this.autoRecoverEnabled && !this.autoRecoverTimer) {
+      const intervalMs = this.autoRecoverIntervalMs;
+      this.logger.log(`Auto-recover enabled interval=${intervalMs}ms`);
+      this.autoRecoverTimer = setInterval(() => {
+        void this.ensureConnected();
+      }, intervalMs);
+    }
+  }
+
+  onModuleDestroy(): void {
+    if (this.autoRecoverTimer) {
+      clearInterval(this.autoRecoverTimer);
+      this.autoRecoverTimer = null;
+    }
   }
 
   /**
@@ -61,56 +76,69 @@ export class WhatsappService implements OnModuleInit {
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private maxConnectionAttemps = 4;
   private pino = P({ level: 'fatal' });
+  private startPromise: Promise<void> | null = null;
+  private autoRecoverTimer: NodeJS.Timeout | null = null;
+  private readonly autoRecoverEnabled = to.boolean(process.env.WHATSAPP_AUTO_RECOVER);
+  private readonly autoRecoverIntervalMs = Math.max(5000, to.number(process.env.WHATSAPP_AUTO_RECOVER_INTERVAL_MS, 30000));
 
   async start(): Promise<void> {
-    this.logger.debug('Start');
-    this.logger.log(`Startup info connected=${this.isConnected} hasClient=${Boolean(this.client)} markOnlineOnConnect=true`);
+    if (this.startPromise) return this.startPromise;
+    this.startPromise = (async () => {
+      this.logger.debug('Start');
+      this.logger.log(`Startup info connected=${this.isConnected} hasClient=${Boolean(this.client)} markOnlineOnConnect=true`);
 
-    // Check if the client is already connected
-    if (this.isConnected && this.client) {
-      const text = 'WhatsApp is already connected!';
-      this.logger.debug(text);
-      await delay(1500);
-      this.eventEmitter.emit('start.event', { qr: '', text });
-      return;
+      // Check if the client is already connected
+      if (this.isConnected && this.client) {
+        const text = 'WhatsApp is already connected!';
+        this.logger.debug(text);
+        await delay(1500);
+        this.eventEmitter.emit('start.event', { qr: '', text });
+        return;
+      }
+
+      const { state, saveCreds } = await useMultiFileAuthState(this.credentialsFolderName);
+      const { version } = await fetchLatestBaileysVersion();
+      this.logger.log(`Using Baileys WA version ${version.join('.')}`);
+      const msgRetryCounterCache = new NodeCache() as CacheStore;
+
+      this.client = makeWASocket({
+        version,
+        logger: this.pino,
+        auth: {
+          creds: state.creds,
+          /** caching makes the store faster to send/recv messages */
+          keys: makeCacheableSignalKeyStore(state.keys, this.pino),
+        },
+        msgRetryCounterCache,
+        generateHighQualityLinkPreview: true,
+        // ignore all broadcast messages -- to receive the same
+        // comment the line below out
+        shouldIgnoreJid: (jid) => isJidBroadcast(jid),
+        // implement to handle retries & poll updates
+        // getMessage
+        browser: Browsers.macOS('Desktop'),
+        syncFullHistory: false,
+        // Keep the session online so presence updates like "composing" are delivered.
+        markOnlineOnConnect: true,
+        printQRInTerminal: false,
+        retryRequestDelayMs: 350,
+        maxMsgRetryCount: 4,
+        connectTimeoutMs: 20_000,
+        keepAliveIntervalMs: 30_000,
+      });
+
+      this.client.ev.on('creds.update', saveCreds);
+      this.client.ev.on('connection.update', this.onConnectionUpdate);
+      this.client.ev.on('messages.upsert', this.onMessageUpsert);
+      this.client.ev.on('call', this.onCall);
+      this.client.ev.on('messaging-history.set', this.onMessagingHistory);
+    })();
+
+    try {
+      await this.startPromise;
+    } finally {
+      this.startPromise = null;
     }
-
-    const { state, saveCreds } = await useMultiFileAuthState(this.credentialsFolderName);
-    const { version } = await fetchLatestBaileysVersion();
-    this.logger.log(`Using Baileys WA version ${version.join('.')}`);
-    const msgRetryCounterCache = new NodeCache() as CacheStore;
-
-    this.client = makeWASocket({
-      version,
-      logger: this.pino,
-      auth: {
-        creds: state.creds,
-        /** caching makes the store faster to send/recv messages */
-        keys: makeCacheableSignalKeyStore(state.keys, this.pino),
-      },
-      msgRetryCounterCache,
-      generateHighQualityLinkPreview: true,
-      // ignore all broadcast messages -- to receive the same
-      // comment the line below out
-      shouldIgnoreJid: (jid) => isJidBroadcast(jid),
-      // implement to handle retries & poll updates
-      // getMessage
-      browser: Browsers.macOS('Desktop'),
-      syncFullHistory: false,
-      // Keep the session online so presence updates like "composing" are delivered.
-      markOnlineOnConnect: true,
-      printQRInTerminal: false,
-      retryRequestDelayMs: 350,
-      maxMsgRetryCount: 4,
-      connectTimeoutMs: 20_000,
-      keepAliveIntervalMs: 30_000,
-    });
-
-    this.client.ev.on('creds.update', saveCreds);
-    this.client.ev.on('connection.update', this.onConnectionUpdate);
-    this.client.ev.on('messages.upsert', this.onMessageUpsert);
-    this.client.ev.on('call', this.onCall);
-    this.client.ev.on('messaging-history.set', this.onMessagingHistory);
   }
 
   /**

@@ -29,6 +29,8 @@ Auto-load webhook URLs at startup (optional):
 
 - `WEBHOOK_URLS`: webhook URLs separated by comma, semicolon, or newline
 - `WEBHOOKS_FILE`: path to a file with webhook URLs (newline or CSV)
+- `WHATSAPP_AUTO_RECOVER`: enable periodic reconnection attempts when the socket is down
+- `WHATSAPP_AUTO_RECOVER_INTERVAL_MS`: interval for auto-recovery checks (default 30000, min 5000)
 
 Example `.env`:
 
@@ -36,6 +38,8 @@ Example `.env`:
 WEBHOOK_URLS=http://192.168.55.73:3350/incomingwa,http://127.0.0.1:3350/incomingwa
 # Optional:
 # WEBHOOKS_FILE=/data/webhooks.csv
+# WHATSAPP_AUTO_RECOVER=true
+# WHATSAPP_AUTO_RECOVER_INTERVAL_MS=30000
 ```
 
 <br/>
