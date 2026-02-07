@@ -60,12 +60,23 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         void this.ensureConnected();
       }, intervalMs);
     }
+
+    if (!this.refreshTimer) {
+      this.logger.log(`Forced refresh enabled interval=${this.forcedRefreshIntervalMs}ms`);
+      this.refreshTimer = setInterval(() => {
+        void this.forceRefreshConnection();
+      }, this.forcedRefreshIntervalMs);
+    }
   }
 
   onModuleDestroy(): void {
     if (this.autoRecoverTimer) {
       clearInterval(this.autoRecoverTimer);
       this.autoRecoverTimer = null;
+    }
+    if (this.refreshTimer) {
+      clearInterval(this.refreshTimer);
+      this.refreshTimer = null;
     }
   }
 
@@ -78,8 +89,10 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   private pino = P({ level: 'fatal' });
   private startPromise: Promise<void> | null = null;
   private autoRecoverTimer: NodeJS.Timeout | null = null;
+  private refreshTimer: NodeJS.Timeout | null = null;
   private readonly autoRecoverEnabled = to.boolean(process.env.WHATSAPP_AUTO_RECOVER);
   private readonly autoRecoverIntervalMs = Math.max(5000, to.number(process.env.WHATSAPP_AUTO_RECOVER_INTERVAL_MS, 30000));
+  private readonly forcedRefreshIntervalMs = 10 * 60 * 1000;
 
   async start(): Promise<void> {
     if (this.startPromise) return this.startPromise;
@@ -192,6 +205,30 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       this.logger.debug(text);
     }
   };
+
+  private async forceRefreshConnection(): Promise<void> {
+    if (!this.client) return;
+
+    try {
+      this.logger.log('Forcing WhatsApp reconnect');
+      if (this.client?.ws?.readyState === 1) {
+        this.client.ws.close();
+      } else if (typeof this.client?.end === 'function') {
+        this.client.end();
+      }
+    } catch (e) {
+      this.logger.debug(`Force refresh close failed: ${to.string((e as any)?.message || e)}`);
+    } finally {
+      this.isConnected = false;
+      this.reconnectCount = 0;
+      await delay(2000);
+      try {
+        await this.start();
+      } catch (e) {
+        this.logger.error('Force refresh failed to restart WhatsApp', e);
+      }
+    }
+  }
 
   // Listen for incoming historical chats and contacts
   private onMessagingHistory = (data: any) => {
