@@ -88,6 +88,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   private maxConnectionAttemps = 4;
   private pino = P({ level: 'fatal' });
   private startPromise: Promise<void> | null = null;
+  private suppressReconnect = false;
   private autoRecoverTimer: NodeJS.Timeout | null = null;
   private refreshTimer: NodeJS.Timeout | null = null;
   private readonly autoRecoverEnabled = to.boolean(process.env.WHATSAPP_AUTO_RECOVER);
@@ -173,6 +174,11 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       const message = error?.output?.payload?.message || error?.message;
       text = message;
 
+      if (this.suppressReconnect) {
+        this.isConnected = false;
+        return;
+      }
+
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut && message !== 'QR refs attempts ended' && this.reconnectCount < this.maxConnectionAttemps;
 
       if (shouldReconnect) {
@@ -210,6 +216,11 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     if (!this.client) return;
 
     try {
+      this.suppressReconnect = true;
+      if (this.reconnectTimeout) {
+        clearTimeout(this.reconnectTimeout);
+        this.reconnectTimeout = null;
+      }
       this.logger.log('Forcing WhatsApp reconnect');
       if (this.client?.ws?.readyState === 1) {
         this.client.ws.close();
@@ -226,6 +237,8 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         await this.start();
       } catch (e) {
         this.logger.error('Force refresh failed to restart WhatsApp', e);
+      } finally {
+        this.suppressReconnect = false;
       }
     }
   }
