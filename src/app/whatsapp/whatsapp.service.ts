@@ -91,11 +91,16 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   private suppressReconnect = false;
   private autoRecoverTimer: NodeJS.Timeout | null = null;
   private refreshTimer: NodeJS.Timeout | null = null;
+  private refreshInProgress = false;
+  private readonly clientIdPrefix = `wa-${Date.now().toString(36)}`;
+  private clientCounter = 0;
+  private currentClientId: string | null = null;
   private readonly autoRecoverEnabled = to.boolean(process.env.WHATSAPP_AUTO_RECOVER);
   private readonly autoRecoverIntervalMs = Math.max(5000, to.number(process.env.WHATSAPP_AUTO_RECOVER_INTERVAL_MS, 30000));
   private readonly forcedRefreshIntervalMs = 10 * 60 * 1000;
 
   async start(): Promise<void> {
+    if (this.refreshInProgress) return;
     if (this.startPromise) return this.startPromise;
     this.startPromise = (async () => {
       this.logger.debug('Start');
@@ -110,12 +115,18 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
+      // If we have a client but it isn't connected, close it before creating a new one.
+      if (this.client && !this.isConnected) {
+        await this.safeCloseClient('restart');
+      }
+
       const { state, saveCreds } = await useMultiFileAuthState(this.credentialsFolderName);
       const { version } = await fetchLatestBaileysVersion();
       this.logger.log(`Using Baileys WA version ${version.join('.')}`);
       const msgRetryCounterCache = new NodeCache() as CacheStore;
 
-      this.client = makeWASocket({
+      const clientId = `${this.clientIdPrefix}-${++this.clientCounter}`;
+      const client = makeWASocket({
         version,
         logger: this.pino,
         auth: {
@@ -141,8 +152,10 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         keepAliveIntervalMs: 30_000,
       });
 
+      this.currentClientId = clientId;
+      this.client = client;
       this.client.ev.on('creds.update', saveCreds);
-      this.client.ev.on('connection.update', this.onConnectionUpdate);
+      this.client.ev.on('connection.update', (state: ConnectionState) => this.onConnectionUpdate(state, clientId));
       this.client.ev.on('messages.upsert', this.onMessageUpsert);
       this.client.ev.on('call', this.onCall);
       this.client.ev.on('messaging-history.set', this.onMessagingHistory);
@@ -158,9 +171,14 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   /**
    * Connection state has been updated -- WS closed, opened, connecting etc.
    */
-  private onConnectionUpdate = async (connectionState: ConnectionState) => {
+  private onConnectionUpdate = async (connectionState: ConnectionState, clientId?: string) => {
     const { connection, lastDisconnect, qr } = connectionState;
     let text = '';
+
+    // Ignore events from stale clients.
+    if (clientId && this.currentClientId && clientId !== this.currentClientId) {
+      return;
+    }
 
     if (is.string(qr) && qr !== '') {
       qrcode.generate(qr, { small: true });
@@ -214,19 +232,17 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
   private async forceRefreshConnection(): Promise<void> {
     if (!this.client) return;
+    if (this.refreshInProgress) return;
 
     try {
+      this.refreshInProgress = true;
       this.suppressReconnect = true;
       if (this.reconnectTimeout) {
         clearTimeout(this.reconnectTimeout);
         this.reconnectTimeout = null;
       }
       this.logger.log('Forcing WhatsApp reconnect');
-      if (this.client?.ws?.readyState === 1) {
-        this.client.ws.close();
-      } else if (typeof this.client?.end === 'function') {
-        this.client.end();
-      }
+      await this.safeCloseClient('force-refresh');
     } catch (e) {
       this.logger.debug(`Force refresh close failed: ${to.string((e as any)?.message || e)}`);
     } finally {
@@ -239,6 +255,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         this.logger.error('Force refresh failed to restart WhatsApp', e);
       } finally {
         this.suppressReconnect = false;
+        this.refreshInProgress = false;
       }
     }
   }
@@ -579,6 +596,24 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       await this.client.logout();
     } catch (e) {
       this.logger.debug(e);
+    }
+  }
+
+  private async safeCloseClient(reason: string): Promise<void> {
+    if (!this.client) return;
+    try {
+      this.logger.debug(`Closing WhatsApp client (${reason})`);
+      if (this.client?.ws?.readyState === 1) {
+        this.client.ws.close();
+      } else if (typeof this.client?.end === 'function') {
+        this.client.end();
+      }
+    } catch (e) {
+      this.logger.debug(`Close client failed: ${to.string((e as any)?.message || e)}`);
+    } finally {
+      this.client = null;
+      this.isConnected = false;
+      this.currentClientId = null;
     }
   }
 
