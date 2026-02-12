@@ -27,6 +27,7 @@ docker run --restart unless-stopped -dp 8085:8085 --name whatsapp-web-api-rest b
 
 Auto-load webhook URLs at startup (optional):
 
+- `API_AUTH_BEARER_TOKEN`: bearer token required on incoming API requests
 - `WEBHOOK_URLS`: webhook URLs separated by comma, semicolon, or newline
 - `WEBHOOKS_FILE`: path to a file with webhook URLs (newline or CSV)
 - `WEBHOOK_AUTH_BEARER_TOKEN`: bearer token sent as `Authorization: Bearer <token>` on webhook requests
@@ -36,6 +37,7 @@ Auto-load webhook URLs at startup (optional):
 Example `.env`:
 
 ```env
+API_AUTH_BEARER_TOKEN=replace-with-a-long-random-token
 WEBHOOK_URLS=http://192.168.55.73:3350/incomingwa,http://127.0.0.1:3350/incomingwa
 # Optional:
 # WEBHOOKS_FILE=/data/webhooks.csv
@@ -71,6 +73,9 @@ npm run dev or pnpm dev
 
 ## 🛠️ API Endpoints
 
+All API endpoints (except `GET /` and static `/public/*`) require:
+`Authorization: Bearer <API_AUTH_BEARER_TOKEN>`
+
 - `GET` /
 
     **Start whatsApp session**
@@ -85,6 +90,7 @@ npm run dev or pnpm dev
     Request Body: `application/json`
 
     `curl -X POST http://localhost:8085/message \
+    -H "Authorization: Bearer <API_AUTH_BEARER_TOKEN>" \
     -H "Content-Type: application/json" -d '{...body}'`
 
     *Body examples*:

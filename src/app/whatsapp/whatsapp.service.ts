@@ -85,7 +85,8 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
    */
   private reconnectCount = 0;
   private reconnectTimeout: NodeJS.Timeout | null = null;
-  private maxConnectionAttemps = 4;
+  private readonly reconnectBackoffMs = [1000, 2000, 2500, 3000, 4000];
+  private maxConnectionAttemps = this.reconnectBackoffMs.length;
   private pino = P({ level: 'fatal' });
   private startPromise: Promise<void> | null = null;
   private suppressReconnect = false;
@@ -201,7 +202,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
       if (shouldReconnect) {
         ++this.reconnectCount;
-        const delay = Math.min(1000 * 2 ** (this.reconnectCount - 1), 30000);
+        const delay = this.reconnectBackoffMs[this.reconnectCount - 1] ?? this.reconnectBackoffMs[this.reconnectBackoffMs.length - 1];
 
         text = `Reconnecting in ${delay}ms (attempt ${this.reconnectCount})`;
 
@@ -248,7 +249,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     } finally {
       this.isConnected = false;
       this.reconnectCount = 0;
-      await delay(2000);
+      await delay(1000);
       try {
         await this.start();
       } catch (e) {

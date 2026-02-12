@@ -10,6 +10,7 @@ IMAGE="${IMAGE:-jaco/whatsapp-web-api-rest:add-converse-status}"
 CONTAINER_NAME="${CONTAINER_NAME:-whatsapp}"
 AUTH_VOLUME="${AUTH_VOLUME:-whatsapp_auth}"
 APP_PORT="${APP_PORT:-8085}"
+API_AUTH_BEARER_TOKEN="${API_AUTH_BEARER_TOKEN:-}"
 ENV_FILE="${ENV_FILE:-$HOME/whatsapp-web-api-rest/.env}"
 REPO_ENV_FILE="${REPO_ENV_FILE:-$HOME/whatsapp-web-api-rest/.env}"
 WEBHOOK_URLS="${WEBHOOK_URLS:-http://192.168.55.73:3350/incomingwa}"
@@ -17,6 +18,14 @@ WEBHOOK_AUTH_BEARER_TOKEN="${WEBHOOK_AUTH_BEARER_TOKEN:-d755d72d2f4a93ca015eecc9
 IMAGE_TAG="${IMAGE_TAG:-local}"
 BUILD_SHA="${BUILD_SHA:-dev}"
 AUTHORIZED_WHATSAPP_IDS="${AUTHORIZED_WHATSAPP_IDS:-}"
+
+if [[ -z "$API_AUTH_BEARER_TOKEN" ]]; then
+  if command -v openssl >/dev/null 2>&1; then
+    API_AUTH_BEARER_TOKEN="$(openssl rand -hex 32)"
+  else
+    API_AUTH_BEARER_TOKEN="$(cat /proc/sys/kernel/random/uuid | tr -d '-')"
+  fi
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -85,6 +94,10 @@ if [[ ! -f "$ENV_FILE" ]]; then
   cat > "$ENV_FILE" <<EOF
 APP_PORT=$APP_PORT
 
+# Required bearer token for incoming API requests.
+# Clients must send: Authorization: Bearer <token>
+API_AUTH_BEARER_TOKEN=$API_AUTH_BEARER_TOKEN
+
 # Optional startup webhook registration:
 # comma/semicolon/newline separated URLs
 WEBHOOK_URLS=$WEBHOOK_URLS
@@ -103,6 +116,7 @@ EOF
   echo "==> Created default env file at '$ENV_FILE'"
 else
   ensure_env_value "APP_PORT" "$APP_PORT" "$ENV_FILE"
+  ensure_env_value "API_AUTH_BEARER_TOKEN" "$API_AUTH_BEARER_TOKEN" "$ENV_FILE"
   ensure_env_value "WEBHOOK_URLS" "$WEBHOOK_URLS" "$ENV_FILE"
   ensure_env_value "WEBHOOK_AUTH_BEARER_TOKEN" "$WEBHOOK_AUTH_BEARER_TOKEN" "$ENV_FILE"
   ensure_env_value "IMAGE_TAG" "$IMAGE_TAG" "$ENV_FILE"
