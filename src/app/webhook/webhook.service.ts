@@ -7,6 +7,7 @@ import { to } from '@src/tools';
 export class WebhookService {
   private readonly filePath: string = path.join(__dirname, '..', 'webhooks.txt');
   private readonly logger = new Logger('Whatsapp');
+  private readonly webhookBearerToken = to.string(process.env.WEBHOOK_AUTH_BEARER_TOKEN).trim();
 
   constructor() {
     this.ensureFileExists();
@@ -50,7 +51,7 @@ export class WebhookService {
   async send(list: [], data: object): Promise<void> {
     const payload = {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.getRequestHeaders(),
       body: JSON.stringify(data),
     };
 
@@ -68,7 +69,7 @@ export class WebhookService {
   async sendWithResponse(list: string[], data: object): Promise<Array<{ url: string; ok: boolean; status: number | null; response: any }>> {
     const payload = {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.getRequestHeaders(),
       body: JSON.stringify(data),
     };
 
@@ -137,5 +138,15 @@ export class WebhookService {
       .map((item) => item.trim())
       .filter((item) => item !== '');
     return Array.from(new Set(parsed));
+  }
+
+  private getRequestHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (this.webhookBearerToken !== '') {
+      headers.Authorization = `Bearer ${this.webhookBearerToken}`;
+    }
+    return headers;
   }
 }

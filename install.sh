@@ -13,6 +13,7 @@ APP_PORT="${APP_PORT:-8085}"
 ENV_FILE="${ENV_FILE:-$HOME/whatsapp-web-api-rest/.env}"
 REPO_ENV_FILE="${REPO_ENV_FILE:-$HOME/whatsapp-web-api-rest/.env}"
 WEBHOOK_URLS="${WEBHOOK_URLS:-http://192.168.55.73:3350/incomingwa}"
+WEBHOOK_AUTH_BEARER_TOKEN="${WEBHOOK_AUTH_BEARER_TOKEN:-d755d72d2f4a93ca015eecc9b07a7c61ba9cb9a6e6fab8387e93a03d5078b194}"
 IMAGE_TAG="${IMAGE_TAG:-local}"
 BUILD_SHA="${BUILD_SHA:-dev}"
 AUTHORIZED_WHATSAPP_IDS="${AUTHORIZED_WHATSAPP_IDS:-}"
@@ -91,6 +92,9 @@ WEBHOOK_URLS=$WEBHOOK_URLS
 # Optional file path that contains webhook URLs (newline or CSV)
 # WEBHOOKS_FILE=/data/webhooks.csv
 
+# Optional bearer token used in outbound webhook requests
+WEBHOOK_AUTH_BEARER_TOKEN=$WEBHOOK_AUTH_BEARER_TOKEN
+
 # Optional startup metadata log fields
 IMAGE_TAG=$IMAGE_TAG
 BUILD_SHA=$BUILD_SHA
@@ -100,6 +104,7 @@ EOF
 else
   ensure_env_value "APP_PORT" "$APP_PORT" "$ENV_FILE"
   ensure_env_value "WEBHOOK_URLS" "$WEBHOOK_URLS" "$ENV_FILE"
+  ensure_env_value "WEBHOOK_AUTH_BEARER_TOKEN" "$WEBHOOK_AUTH_BEARER_TOKEN" "$ENV_FILE"
   ensure_env_value "IMAGE_TAG" "$IMAGE_TAG" "$ENV_FILE"
   ensure_env_value "BUILD_SHA" "$BUILD_SHA" "$ENV_FILE"
   ensure_env_value "AUTHORIZED_WHATSAPP_IDS" "$AUTHORIZED_WHATSAPP_IDS" "$ENV_FILE"
