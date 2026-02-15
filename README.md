@@ -38,7 +38,7 @@ Example `.env`:
 
 ```env
 API_AUTH_BEARER_TOKEN=replace-with-a-long-random-token
-WEBHOOK_URLS=http://192.168.55.73:3350/incomingwa,http://127.0.0.1:3350/incomingwa
+WEBHOOK_URLS=http://192.168.55.73:3350/receive-msg,http://127.0.0.1:3350/receive-msg
 # Optional:
 # WEBHOOKS_FILE=/data/webhooks.csv
 # WEBHOOK_AUTH_BEARER_TOKEN=d755d72d2f4a93ca015eecc9b07a7c61ba9cb9a6e6fab8387e93a03d5078b194

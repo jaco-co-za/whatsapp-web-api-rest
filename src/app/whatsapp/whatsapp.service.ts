@@ -319,28 +319,29 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                   media.caption = this.getMediaCaption(item);
                   media.base64 = mediaBuffer.toString('base64');
                 }
+                if (type !== 'text' && type !== 'audio') {
+                  this.logger.debug(`Skipping unsupported inbound type=${type}`);
+                  continue;
+                }
 
                 // Webhook
-                const pushName = to.string(item?.pushName);
-                const messageId = to.string(item?.key?.id);
-                const participant = to.string(item?.key?.participant);
                 const replyId = this.getReplyId(item);
-                const webhookPayload = {
-                  from,
-                  pushName,
-                  isMe,
-                  type,
-                  message,
-                  messageId,
-                  replyId: replyId === '' ? undefined : replyId,
-                  key: {
-                    remoteJid: from,
-                    id: messageId,
-                    fromMe: isMe,
-                    participant: participant === '' ? undefined : participant,
-                  },
-                  media,
-                };
+                const webhookPayload: Record<string, any> =
+                  type === 'audio'
+                    ? {
+                        from,
+                        type: 'audio',
+                        media: {
+                          base64: media.base64,
+                          mimeType: media.mimeType,
+                          caption: media.caption,
+                        },
+                      }
+                    : {
+                        from,
+                        message,
+                      };
+                if (replyId !== '') webhookPayload.replyId = replyId;
                 const normalizedJid = this.normalizeJid(from);
                 const webhookStart = Date.now();
                 try {
