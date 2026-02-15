@@ -130,6 +130,24 @@ if [[ -f "$REPO_ENV_FILE" ]]; then
   echo "==> Injected values from '$REPO_ENV_FILE' into '$ENV_FILE'"
 fi
 
+# Align docker port publish with the effective env file value.
+if grep -qE '^APP_PORT=' "$ENV_FILE"; then
+  APP_PORT="$(grep -E '^APP_PORT=' "$ENV_FILE" | tail -n1 | cut -d'=' -f2- | tr -d '[:space:]')"
+fi
+if [[ -z "$APP_PORT" ]]; then
+  echo "APP_PORT is empty. Set APP_PORT in '$ENV_FILE' to a valid TCP port (1-65535)."
+  exit 1
+fi
+if [[ ! "$APP_PORT" =~ ^[0-9]+$ ]]; then
+  echo "APP_PORT='$APP_PORT' is invalid. APP_PORT must be numeric (1-65535)."
+  exit 1
+fi
+if (( APP_PORT < 1 || APP_PORT > 65535 )); then
+  echo "APP_PORT='$APP_PORT' is out of range. Use a port between 1 and 65535."
+  exit 1
+fi
+echo "==> Effective APP_PORT: $APP_PORT"
+
 echo "==> Syncing branch '$BRANCH' from '$REMOTE'..."
 git remote set-url "$REMOTE" "$REPO_URL"
 git fetch "$REMOTE" "$BRANCH"
