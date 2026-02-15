@@ -3,7 +3,7 @@
 set -euo pipefail
 
 REPO_URL="${REPO_URL:-https://github.com/jaco-co-za/whatsapp-web-api-rest.git}"
-BRANCH="${BRANCH:-add-converse-status}"
+BRANCH="${BRANCH:-main}"
 REMOTE="${REMOTE:-origin}"
 
 IMAGE="${IMAGE:-jaco/whatsapp-web-api-rest:add-converse-status}"
