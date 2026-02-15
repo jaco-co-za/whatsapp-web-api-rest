@@ -61,11 +61,13 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       }, intervalMs);
     }
 
-    if (!this.refreshTimer) {
+    if (this.forcedRefreshEnabled && !this.refreshTimer) {
       this.logger.log(`Forced refresh enabled interval=${this.forcedRefreshIntervalMs}ms`);
       this.refreshTimer = setInterval(() => {
         void this.forceRefreshConnection();
       }, this.forcedRefreshIntervalMs);
+    } else if (!this.forcedRefreshEnabled) {
+      this.logger.log('Forced refresh disabled');
     }
   }
 
@@ -98,7 +100,8 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   private currentClientId: string | null = null;
   private readonly autoRecoverEnabled = to.boolean(process.env.WHATSAPP_AUTO_RECOVER);
   private readonly autoRecoverIntervalMs = Math.max(5000, to.number(process.env.WHATSAPP_AUTO_RECOVER_INTERVAL_MS, 30000));
-  private readonly forcedRefreshIntervalMs = 10 * 60 * 1000;
+  private readonly forcedRefreshEnabled = process.env.WHATSAPP_FORCE_REFRESH_ENABLED === undefined ? true : to.boolean(process.env.WHATSAPP_FORCE_REFRESH_ENABLED);
+  private readonly forcedRefreshIntervalMs = Math.max(60_000, to.number(process.env.WHATSAPP_FORCE_REFRESH_INTERVAL_MS, 10 * 60 * 1000));
 
   async start(): Promise<void> {
     if (this.refreshInProgress) return;
