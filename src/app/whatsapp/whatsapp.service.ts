@@ -407,74 +407,95 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
    * Send a message to a specific chatId
    */
   async sendMessage(payload: IMessage): Promise<any | object> {
+    const chatId = to.string(payload?.chatId);
+    const options = payload?.options;
+    const content = this.buildMessageContent(payload);
+
     try {
-      const chatId = to.string(payload?.chatId);
-      const { text, options, media, location, poll, contact } = payload;
-      let content: any = { text };
-
-      if (is.object(media)) {
-        const typeFile = to.string(media?.type);
-        const base64 = to.string(media?.data);
-        if (typeFile !== '' && base64 !== '') {
-          const buffer = Buffer.from(to.string(media?.data), 'base64');
-          content = {
-            [typeFile]: buffer,
-            caption: to.undefined(media?.caption),
-            mimetype: to.undefined(media?.mimetype),
-            fileName: to.undefined(media?.filename),
-            ptt: to.undefined(media?.ptt),
-            gifPlayback: to.undefined(media?.gifPlayback),
-          };
-        }
-      } else if (is.object(location)) {
-        content = {
-          location: {
-            ...location,
-            name: location?.name,
-            url: location?.url,
-            address: location?.address,
-            degreesLatitude: location?.latitude,
-            degreesLongitude: location?.longitude,
-          },
-        };
-      } else if (is.object(poll)) {
-        content = {
-          poll: {
-            name: poll?.name,
-            values: poll.options,
-            selectableCount: is.undefined(poll?.allowMultipleAnswers) ? 0 : poll?.allowMultipleAnswers,
-          },
-        };
-      } else if (is.object(contact)) {
-        const firstname = to.string(contact?.firstname);
-        const lastname = to.string(contact?.lastname);
-        const email = to.string(contact?.email);
-        const phone = to.string(contact?.phone).replace(/ /g, '').replace(/\+/g, '');
-
-        const displayName = `${firstname} ${lastname}`;
-
-        const vcard =
-          'BEGIN:VCARD\n' +
-          'VERSION:3.0\n' +
-          //`N:;${lastname};${firstname};;;\n` +
-          `FN:${displayName}\n` +
-          `EMAIL;TYPE=Work:${email}\n` +
-          `TEL;type=CELL;type=VOICE;waid=${phone}:${phone}\n` +
-          'END:VCARD';
-
-        content = {
-          contacts: {
-            displayName,
-            contacts: [{ vcard }],
-          },
-        };
-      }
-
-      if (chatId !== '' && is.object(content)) return this.client.sendMessage(chatId, content, options);
+      if (chatId === '' || !is.object(content)) return {};
+      if (!this.client || !this.isConnected) await this.ensureConnected();
+      if (!this.client) return {};
+      return await this.client.sendMessage(chatId, content, options);
     } catch (e) {
+      if (this.isConnectionClosedError(e)) {
+        this.logger.debug('sendMessage detected closed connection, attempting one reconnect retry');
+        try {
+          await this.ensureConnected();
+          if (this.client && chatId !== '' && is.object(content)) return await this.client.sendMessage(chatId, content, options);
+        } catch (retryError) {
+          this.logger.debug(retryError);
+        }
+      }
       this.logger.debug(e);
     }
     return {};
+  }
+
+  private isConnectionClosedError(error: unknown): boolean {
+    const message = to.string((error as any)?.message || '').toLowerCase();
+    return message.includes('connection closed') || message.includes('not connected');
+  }
+
+  private buildMessageContent(payload: IMessage): Record<string, any> {
+    const { text, media, location, poll, contact } = payload;
+    let content: Record<string, any> = { text };
+
+    if (is.object(media)) {
+      const typeFile = to.string(media?.type);
+      const base64 = to.string(media?.data);
+      if (typeFile !== '' && base64 !== '') {
+        const buffer = Buffer.from(to.string(media?.data), 'base64');
+        content = {
+          [typeFile]: buffer,
+          caption: to.undefined(media?.caption),
+          mimetype: to.undefined(media?.mimetype),
+          fileName: to.undefined(media?.filename),
+          ptt: to.undefined(media?.ptt),
+          gifPlayback: to.undefined(media?.gifPlayback),
+        };
+      }
+    } else if (is.object(location)) {
+      content = {
+        location: {
+          ...location,
+          name: location?.name,
+          url: location?.url,
+          address: location?.address,
+          degreesLatitude: location?.latitude,
+          degreesLongitude: location?.longitude,
+        },
+      };
+    } else if (is.object(poll)) {
+      content = {
+        poll: {
+          name: poll?.name,
+          values: poll.options,
+          selectableCount: is.undefined(poll?.allowMultipleAnswers) ? 0 : poll?.allowMultipleAnswers,
+        },
+      };
+    } else if (is.object(contact)) {
+      const firstname = to.string(contact?.firstname);
+      const lastname = to.string(contact?.lastname);
+      const email = to.string(contact?.email);
+      const phone = to.string(contact?.phone).replace(/ /g, '').replace(/\+/g, '');
+      const displayName = `${firstname} ${lastname}`;
+      const vcard =
+        'BEGIN:VCARD\n' +
+        'VERSION:3.0\n' +
+        `FN:${displayName}\n` +
+        `EMAIL;TYPE=Work:${email}\n` +
+        `TEL;type=CELL;type=VOICE;waid=${phone}:${phone}\n` +
+        'END:VCARD';
+
+      content = {
+        contacts: {
+          displayName,
+          contacts: [{ vcard }],
+        },
+      };
+    }
+
+    return content;
   }
 
   /**
