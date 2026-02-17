@@ -191,6 +191,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
     // Handle connection close and reconnection logic
     if (connection === 'close') {
+      this.isConnected = false;
       const error = lastDisconnect?.error as Boom;
       const statusCode = error?.output?.statusCode;
       const message = error?.output?.payload?.message || error?.message;
