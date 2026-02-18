@@ -315,14 +315,17 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                 if (message === '') message = to.string(item?.message?.extendedTextMessage?.text);
 
                 // Media
+                const hasDocumentMessage = Boolean(item?.message?.documentMessage || item?.message?.documentWithCaptionMessage?.message?.documentMessage);
                 const mimeType = this.getMediaMimeType(item);
                 const media = { mimeType, caption: '', base64: '', fileName: '' };
-                if (mimeType !== '') {
+                if (mimeType !== '' || hasDocumentMessage) {
                   type = this.getMediaType(item);
-                  const mediaBuffer = await downloadMediaMessage(item, 'buffer', {});
-                  media.caption = this.getMediaCaption(item);
-                  media.fileName = this.getMediaFileName(item);
-                  media.base64 = mediaBuffer.toString('base64');
+                  if (type === 'audio' || type === 'document') {
+                    const mediaBuffer = await downloadMediaMessage(item, 'buffer', {});
+                    media.caption = this.getMediaCaption(item);
+                    media.fileName = this.getMediaFileName(item);
+                    media.base64 = mediaBuffer.toString('base64');
+                  }
                 }
                 if (type !== 'text' && type !== 'audio' && type !== 'document') {
                   this.logger.debug(`Skipping unsupported inbound type=${type}`);
