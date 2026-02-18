@@ -316,14 +316,15 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
                 // Media
                 const mimeType = this.getMediaMimeType(item);
-                const media = { mimeType, caption: '', base64: '' };
+                const media = { mimeType, caption: '', base64: '', fileName: '' };
                 if (mimeType !== '') {
                   type = this.getMediaType(item);
                   const mediaBuffer = await downloadMediaMessage(item, 'buffer', {});
                   media.caption = this.getMediaCaption(item);
+                  media.fileName = this.getMediaFileName(item);
                   media.base64 = mediaBuffer.toString('base64');
                 }
-                if (type !== 'text' && type !== 'audio') {
+                if (type !== 'text' && type !== 'audio' && type !== 'document') {
                   this.logger.debug(`Skipping unsupported inbound type=${type}`);
                   continue;
                 }
@@ -331,14 +332,15 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                 // Webhook
                 const replyId = this.getReplyId(item);
                 const webhookPayload: Record<string, any> =
-                  type === 'audio'
+                  type === 'audio' || type === 'document'
                     ? {
                         from,
-                        type: 'audio',
+                        type,
                         media: {
                           base64: media.base64,
                           mimeType: media.mimeType,
                           caption: media.caption,
+                          fileName: media.fileName,
                         },
                       }
                     : {
@@ -745,6 +747,14 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     const { imageMessage, videoMessage, documentMessage, audioMessage, documentWithCaptionMessage } = conversation?.message || {};
 
     return to.string(imageMessage?.caption ?? audioMessage?.caption ?? videoMessage?.caption ?? documentMessage?.caption ?? documentWithCaptionMessage?.message?.documentMessage?.caption);
+  }
+
+  private getMediaFileName(conversation: any): string {
+    if (!conversation?.message) return '';
+
+    const { documentMessage, documentWithCaptionMessage } = conversation?.message || {};
+
+    return to.string(documentMessage?.fileName ?? documentWithCaptionMessage?.message?.documentMessage?.fileName);
   }
 
   private getMediaType(conversation: any): string {
