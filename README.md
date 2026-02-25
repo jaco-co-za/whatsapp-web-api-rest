@@ -31,8 +31,9 @@ Auto-load webhook URLs at startup (optional):
 - `WEBHOOK_URLS`: webhook URLs separated by comma, semicolon, or newline
 - `WEBHOOKS_FILE`: path to a file with webhook URLs (newline or CSV)
 - `WEBHOOK_AUTH_BEARER_TOKEN`: bearer token sent as `Authorization: Bearer <token>` on webhook requests
-- `WHATSAPP_AUTO_RECOVER`: enable periodic reconnection attempts when the socket is down
+- `WHATSAPP_AUTO_RECOVER`: enable periodic reconnection attempts when the socket is down (default `true`)
 - `WHATSAPP_AUTO_RECOVER_INTERVAL_MS`: interval for auto-recovery checks (default 30000, min 5000)
+- `WHATSAPP_RECONNECT_MAX_DELAY_MS`: max backoff delay for internal reconnect loop (default 60000, min 10000)
 
 Example `.env`:
 
@@ -44,6 +45,7 @@ WEBHOOK_URLS=http://192.168.55.73:3350/receive-msg,http://127.0.0.1:3350/receive
 # WEBHOOK_AUTH_BEARER_TOKEN=d755d72d2f4a93ca015eecc9b07a7c61ba9cb9a6e6fab8387e93a03d5078b194
 # WHATSAPP_AUTO_RECOVER=true
 # WHATSAPP_AUTO_RECOVER_INTERVAL_MS=30000
+# WHATSAPP_RECONNECT_MAX_DELAY_MS=60000
 ```
 
 <br/>

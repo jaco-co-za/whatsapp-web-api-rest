@@ -87,8 +87,9 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
    */
   private reconnectCount = 0;
   private reconnectTimeout: NodeJS.Timeout | null = null;
-  private readonly reconnectBackoffMs = [1000, 2000, 2500, 3000, 4000];
-  private maxConnectionAttemps = this.reconnectBackoffMs.length;
+  private reconnectDelayMs = 0;
+  private readonly reconnectMinDelayMs = 1000;
+  private readonly reconnectMaxDelayMs = Math.max(10_000, to.number(process.env.WHATSAPP_RECONNECT_MAX_DELAY_MS, 60_000));
   private pino = P({ level: 'fatal' });
   private startPromise: Promise<void> | null = null;
   private suppressReconnect = false;
@@ -98,7 +99,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   private readonly clientIdPrefix = `wa-${Date.now().toString(36)}`;
   private clientCounter = 0;
   private currentClientId: string | null = null;
-  private readonly autoRecoverEnabled = to.boolean(process.env.WHATSAPP_AUTO_RECOVER);
+  private readonly autoRecoverEnabled = process.env.WHATSAPP_AUTO_RECOVER === undefined ? true : to.boolean(process.env.WHATSAPP_AUTO_RECOVER);
   private readonly autoRecoverIntervalMs = Math.max(5000, to.number(process.env.WHATSAPP_AUTO_RECOVER_INTERVAL_MS, 30000));
   private readonly forcedRefreshEnabled = process.env.WHATSAPP_FORCE_REFRESH_ENABLED === undefined ? true : to.boolean(process.env.WHATSAPP_FORCE_REFRESH_ENABLED);
   private readonly forcedRefreshIntervalMs = Math.max(60_000, to.number(process.env.WHATSAPP_FORCE_REFRESH_INTERVAL_MS, 10 * 60 * 1000));
@@ -167,6 +168,13 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
 
     try {
       await this.startPromise;
+    } catch (e) {
+      if (!this.suppressReconnect) {
+        const message = to.string((e as any)?.message || e || 'start failed');
+        const reconnectAttempt = this.scheduleReconnect(message);
+        this.logger.warn(`Start failed, retrying in ${reconnectAttempt.delayMs}ms (attempt ${reconnectAttempt.attempt}): ${message}`);
+      }
+      throw e;
     } finally {
       this.startPromise = null;
     }
@@ -202,26 +210,22 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
-      const shouldReconnect = statusCode !== DisconnectReason.loggedOut && message !== 'QR refs attempts ended' && this.reconnectCount < this.maxConnectionAttemps;
+      const shouldReconnect = !this.isPermanentDisconnect(statusCode, message);
 
       if (shouldReconnect) {
-        ++this.reconnectCount;
-        const delay = this.reconnectBackoffMs[this.reconnectCount - 1] ?? this.reconnectBackoffMs[this.reconnectBackoffMs.length - 1];
-
-        text = `Reconnecting in ${delay}ms (attempt ${this.reconnectCount})`;
-
-        this.reconnectTimeout = setTimeout(async () => {
-          await this.start();
-        }, delay);
+        const reconnectAttempt = this.scheduleReconnect(message);
+        text = `Reconnecting in ${reconnectAttempt.delayMs}ms (attempt ${reconnectAttempt.attempt})`;
         return;
       }
 
       // Reset on permanent failure
       this.reconnectCount = 0;
+      this.reconnectDelayMs = 0;
       this.isConnected = false;
     } else if (connection === 'open') {
       text = 'Connected to WhatsApp!';
       this.reconnectCount = 0;
+      this.reconnectDelayMs = 0;
       this.isConnected = true;
       if (this.reconnectTimeout) {
         clearTimeout(this.reconnectTimeout);
@@ -234,6 +238,47 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       this.logger.debug(text);
     }
   };
+
+  private isPermanentDisconnect(statusCode?: number, message?: string): boolean {
+    return statusCode === DisconnectReason.loggedOut || to.string(message) === 'QR refs attempts ended';
+  }
+
+  private isLikelyNetworkError(message: string): boolean {
+    const normalizedMessage = to.string(message).toLowerCase();
+    if (normalizedMessage === '') return false;
+    return normalizedMessage.includes('eai_again') || normalizedMessage.includes('enotfound') || normalizedMessage.includes('etimedout') || normalizedMessage.includes('network');
+  }
+
+  private getReconnectDelayMs(attempt: number, message: string): number {
+    const retryAttempt = Math.max(1, attempt);
+    const exponential = this.reconnectMinDelayMs * 2 ** Math.min(7, retryAttempt - 1);
+    const capped = Math.min(exponential, this.reconnectMaxDelayMs);
+    const jitter = Math.floor(Math.random() * 250);
+    const networkPenalty = this.isLikelyNetworkError(message) ? 1000 : 0;
+    return Math.min(this.reconnectMaxDelayMs, capped + jitter + networkPenalty);
+  }
+
+  private scheduleReconnect(message: string): { attempt: number; delayMs: number } {
+    if (this.reconnectTimeout) {
+      return { attempt: this.reconnectCount, delayMs: this.reconnectDelayMs };
+    }
+
+    ++this.reconnectCount;
+    const attempt = this.reconnectCount;
+    const delayMs = this.getReconnectDelayMs(attempt, message);
+    this.reconnectDelayMs = delayMs;
+
+    this.reconnectTimeout = setTimeout(async () => {
+      this.reconnectTimeout = null;
+      try {
+        await this.start();
+      } catch (e) {
+        this.logger.debug(`Reconnect start failed: ${to.string((e as any)?.message || e)}`);
+      }
+    }, delayMs);
+
+    return { attempt, delayMs };
+  }
 
   private async forceRefreshConnection(): Promise<void> {
     if (!this.client) return;
@@ -253,6 +298,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     } finally {
       this.isConnected = false;
       this.reconnectCount = 0;
+      this.reconnectDelayMs = 0;
       await delay(1000);
       try {
         await this.start();
