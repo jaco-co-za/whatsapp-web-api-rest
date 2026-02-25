@@ -344,6 +344,12 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
             for (const item of messages) {
               if (item?.message) {
                 //this.logger.log(item)
+                if (this.isDeletedMessageEvent(item)) {
+                  const messageId = to.string(item?.key?.id);
+                  this.logger.debug(`Skipping deleted message event id=${messageId}`);
+                  continue;
+                }
+
                 const from = to.string(item?.key?.remoteJid);
                 if (isJidStatusBroadcast(from) || isJidNewsletter(from) || isJidBroadcast(from)) return;
                 const isMe = to.boolean(item?.key?.fromMe);
@@ -931,6 +937,24 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     }
 
     return 0;
+  }
+
+  private isDeletedMessageEvent(message: any): boolean {
+    const root = message?.message;
+    if (!is.object(root)) return false;
+
+    const candidates = [root, root?.ephemeralMessage?.message, root?.viewOnceMessage?.message, root?.viewOnceMessageV2?.message, root?.viewOnceMessageV2Extension?.message];
+    for (const candidate of candidates) {
+      if (!is.object(candidate)) continue;
+      const protocolMessage = candidate?.protocolMessage;
+      if (!is.object(protocolMessage)) continue;
+
+      const protocolType = protocolMessage?.type;
+      if (protocolType === 0 || to.string(protocolType).trim() === '0') return true;
+      if (to.string(protocolType).toUpperCase() === 'REVOKE') return true;
+    }
+
+    return false;
   }
 
   // Read existing data from the JSON file
