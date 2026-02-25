@@ -359,6 +359,8 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                 let type = 'text';
                 let message = to.string(item?.message?.conversation);
                 if (message === '') message = to.string(item?.message?.extendedTextMessage?.text);
+                const location = this.getLocationPayload(item);
+                if (location) type = 'location';
 
                 // Media
                 const hasDocumentMessage = Boolean(item?.message?.documentMessage || item?.message?.documentWithCaptionMessage?.message?.documentMessage);
@@ -373,7 +375,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                     media.base64 = mediaBuffer.toString('base64');
                   }
                 }
-                if (type !== 'text' && type !== 'audio' && type !== 'document') {
+                if (type !== 'text' && type !== 'audio' && type !== 'document' && type !== 'location') {
                   this.logger.debug(`Skipping unsupported inbound type=${type}`);
                   continue;
                 }
@@ -392,6 +394,12 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                           fileName: media.fileName,
                         },
                       }
+                    : type === 'location' && location
+                      ? {
+                          from,
+                          type,
+                          location,
+                        }
                     : {
                         from,
                         message,
@@ -836,9 +844,30 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       conversation?.message?.videoMessage?.contextInfo ||
       conversation?.message?.documentMessage?.contextInfo ||
       conversation?.message?.audioMessage?.contextInfo ||
+      conversation?.message?.locationMessage?.contextInfo ||
+      conversation?.message?.liveLocationMessage?.contextInfo ||
       conversation?.message?.stickerMessage?.contextInfo;
 
     return to.string(contextInfo?.stanzaId);
+  }
+
+  private getLocationPayload(conversation: any): { latitude: number; longitude: number; name: string; address: string; url: string } | null {
+    if (!conversation?.message) return null;
+
+    const location = conversation?.message?.locationMessage || conversation?.message?.liveLocationMessage;
+    if (!location) return null;
+
+    const latitude = Number(location?.degreesLatitude);
+    const longitude = Number(location?.degreesLongitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+    return {
+      latitude,
+      longitude,
+      name: to.string(location?.name),
+      address: to.string(location?.address),
+      url: to.string(location?.url),
+    };
   }
 
   // Baileys expects user chats as @s.whatsapp.net for presence operations.
