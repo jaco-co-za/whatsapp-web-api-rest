@@ -30,11 +30,17 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   private client: any = null;
   private isConnected = false;
   private readonly filePath: string = path.join(__dirname, '..', 'whatsapp_data.json');
+  private readonly blockedUsersFilePath: string = path.join(__dirname, '..', 'blocked_users.json');
   private readonly credentialsFolderName = 'auth_info';
   private readonly maxWebhookMessageAgeMs = 60_000;
+  private readonly spamDetectionWindowMs = 5 * 60 * 1000;
+  private readonly spamDetectionThreshold = 10;
+  private readonly spamBlockDurationMs = 6 * 60 * 60 * 1000;
   private readonly logger = new Logger('Whatsapp');
   private messageQueue: Promise<void> = Promise.resolve();
   private readonly authorizedWhatsAppIds: Set<string>;
+  private readonly blockedUsers: Map<string, number> = new Map();
+  private readonly inboundPatternsBySender: Map<string, Array<{ pattern: string; timestamp: number }>> = new Map();
 
   constructor(
     private eventEmitter: EventEmitter2,
@@ -44,6 +50,8 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleInit(): Promise<void> {
+    this.loadBlockedUsersFromFile();
+
     if (!this.hasSavedSession()) return;
 
     this.logger.debug('Saved WhatsApp session found, starting automatically...');
@@ -354,6 +362,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                 if (isJidStatusBroadcast(from) || isJidNewsletter(from) || isJidBroadcast(from)) return;
                 const isMe = to.boolean(item?.key?.fromMe);
                 if (isMe) continue;
+                if (this.isBlockedUser(from)) continue;
                 if (!this.isAuthorizedMessage(item)) continue;
                 if (this.isMessageOlderThanMaxAge(item)) {
                   const messageId = to.string(item?.key?.id);
@@ -383,6 +392,11 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                 }
                 if (type !== 'text' && type !== 'audio' && type !== 'document' && type !== 'location') {
                   this.logger.debug(`Skipping unsupported inbound type=${type}`);
+                  continue;
+                }
+                const spamPattern = this.buildSpamPattern(type, message, media.mimeType, media.fileName, location);
+                if (this.shouldBlockForRepeatedPattern(from, spamPattern)) {
+                  this.logger.warn(`Blocking sender for repeated pattern jid=${from}`);
                   continue;
                 }
 
@@ -955,6 +969,130 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     }
 
     return false;
+  }
+
+  private loadBlockedUsersFromFile(): void {
+    if (!fs.existsSync(this.blockedUsersFilePath)) return;
+
+    try {
+      const raw = fs.readFileSync(this.blockedUsersFilePath, 'utf8');
+      if (raw.trim() === '') return;
+
+      const parsed = JSON.parse(raw);
+      const source = is.object(parsed?.blockedUsers) ? parsed.blockedUsers : parsed;
+      if (!is.object(source)) return;
+
+      const now = Date.now();
+      let changed = false;
+
+      for (const [jid, expiresAtRaw] of Object.entries(source)) {
+        const normalizedJid = this.normalizeBlockKey(jid);
+        const expiresAt = Number(expiresAtRaw);
+        if (normalizedJid === '' || !Number.isFinite(expiresAt) || expiresAt <= now) {
+          changed = true;
+          continue;
+        }
+        this.blockedUsers.set(normalizedJid, expiresAt);
+      }
+
+      if (changed) this.persistBlockedUsersToFile();
+    } catch (e) {
+      this.logger.error(`Failed to load blocked users file path=${this.blockedUsersFilePath}`);
+      this.logger.debug(e);
+    }
+  }
+
+  private persistBlockedUsersToFile(): void {
+    const blockedUsers = Object.fromEntries([...this.blockedUsers.entries()].sort(([a], [b]) => a.localeCompare(b)));
+    fs.writeFileSync(this.blockedUsersFilePath, JSON.stringify({ blockedUsers }, null, 2), 'utf8');
+  }
+
+  private pruneExpiredBlockedUsers(now = Date.now()): boolean {
+    let changed = false;
+    for (const [jid, expiresAt] of this.blockedUsers.entries()) {
+      if (expiresAt <= now) {
+        this.blockedUsers.delete(jid);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  private isBlockedUser(jid: string): boolean {
+    const normalizedJid = this.normalizeBlockKey(jid);
+    if (normalizedJid === '') return false;
+
+    const now = Date.now();
+    let changed = this.pruneExpiredBlockedUsers(now);
+    const expiresAt = this.blockedUsers.get(normalizedJid);
+
+    if (!is.number(expiresAt)) {
+      if (changed) this.persistBlockedUsersToFile();
+      return false;
+    }
+
+    if (expiresAt <= now) {
+      this.blockedUsers.delete(normalizedJid);
+      changed = true;
+      if (changed) this.persistBlockedUsersToFile();
+      return false;
+    }
+
+    if (changed) this.persistBlockedUsersToFile();
+    return true;
+  }
+
+  private shouldBlockForRepeatedPattern(jid: string, pattern: string): boolean {
+    const normalizedJid = this.normalizeBlockKey(jid);
+    if (normalizedJid === '' || pattern === '') return false;
+    if (this.isBlockedUser(normalizedJid)) return true;
+
+    const now = Date.now();
+    const thresholdStart = now - this.spamDetectionWindowMs;
+    const currentHistory = this.inboundPatternsBySender.get(normalizedJid) || [];
+    const nextHistory = currentHistory.filter((entry) => entry.timestamp >= thresholdStart);
+    nextHistory.push({ pattern, timestamp: now });
+    this.inboundPatternsBySender.set(normalizedJid, nextHistory);
+
+    const repeatedCount = nextHistory.filter((entry) => entry.pattern === pattern).length;
+    if (repeatedCount < this.spamDetectionThreshold) return false;
+
+    this.blockedUsers.set(normalizedJid, now + this.spamBlockDurationMs);
+    this.inboundPatternsBySender.delete(normalizedJid);
+    this.persistBlockedUsersToFile();
+    return true;
+  }
+
+  private buildSpamPattern(
+    type: string,
+    message: string,
+    mimeType: string,
+    fileName: string,
+    location: { latitude: number; longitude: number; name: string; address: string; url: string } | null,
+  ): string {
+    if (type === 'location' && location) {
+      const latitude = Number(location.latitude).toFixed(4);
+      const longitude = Number(location.longitude).toFixed(4);
+      return `location:${latitude},${longitude}:${this.normalizeSpamText(location.name)}:${this.normalizeSpamText(location.address)}:${this.normalizeSpamText(location.url)}`;
+    }
+
+    const normalizedMessage = this.normalizeSpamText(message);
+    const normalizedMimeType = this.normalizeSpamText(mimeType);
+    const normalizedFileName = this.normalizeSpamText(fileName);
+    return `${type}:${normalizedMessage}:${normalizedMimeType}:${normalizedFileName}`;
+  }
+
+  private normalizeSpamText(value: string): string {
+    return to
+      .string(value)
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .slice(0, 300);
+  }
+
+  private normalizeBlockKey(jid: string): string {
+    return to.string(jid).trim().toLowerCase();
   }
 
   // Read existing data from the JSON file
