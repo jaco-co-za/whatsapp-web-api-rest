@@ -364,6 +364,11 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                 if (isMe) continue;
                 if (this.isBlockedUser(from)) continue;
                 if (!this.isAuthorizedMessage(item)) continue;
+                const inboundPattern = this.buildInboundSpamPattern(item);
+                if (this.shouldBlockForRepeatedPattern(from, inboundPattern)) {
+                  this.logger.warn(`Blocking sender for repeated pattern jid=${from}`);
+                  continue;
+                }
                 if (this.isMessageOlderThanMaxAge(item)) {
                   const messageId = to.string(item?.key?.id);
                   this.logger.debug(`Skipping stale message id=${messageId}`);
@@ -392,11 +397,6 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                 }
                 if (type !== 'text' && type !== 'audio' && type !== 'document' && type !== 'location') {
                   this.logger.debug(`Skipping unsupported inbound type=${type}`);
-                  continue;
-                }
-                const spamPattern = this.buildSpamPattern(type, message, media.mimeType, media.fileName, location);
-                if (this.shouldBlockForRepeatedPattern(from, spamPattern)) {
-                  this.logger.warn(`Blocking sender for repeated pattern jid=${from}`);
                   continue;
                 }
 
@@ -1061,6 +1061,37 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     this.inboundPatternsBySender.delete(normalizedJid);
     this.persistBlockedUsersToFile();
     return true;
+  }
+
+  private buildInboundSpamPattern(message: any): string {
+    const root = this.extractInboundMessageRoot(message?.message);
+    if (!is.object(root)) return '';
+
+    const locationPayload = this.getLocationPayload({ message: root });
+    if (locationPayload) return this.buildSpamPattern('location', '', '', '', locationPayload);
+
+    const text = to.string(root?.conversation || root?.extendedTextMessage?.text);
+    if (text !== '') return this.buildSpamPattern('text', text, '', '', null);
+
+    const mimeType = this.getMediaMimeType({ message: root });
+    const fileName = this.getMediaFileName({ message: root });
+    const mediaType = this.getMediaType({ message: root });
+    if (mediaType !== '' && mediaType !== 'unknown') return this.buildSpamPattern(mediaType, this.getMediaCaption({ message: root }), mimeType, fileName, null);
+
+    const rootKeys = Object.keys(root);
+    if (rootKeys.length === 0) return '';
+    return `unknown:${this.normalizeSpamText(rootKeys.sort().join('|'))}`;
+  }
+
+  private extractInboundMessageRoot(root: any): any {
+    if (!is.object(root)) return null;
+
+    if (is.object(root?.ephemeralMessage?.message)) return this.extractInboundMessageRoot(root.ephemeralMessage.message);
+    if (is.object(root?.viewOnceMessage?.message)) return this.extractInboundMessageRoot(root.viewOnceMessage.message);
+    if (is.object(root?.viewOnceMessageV2?.message)) return this.extractInboundMessageRoot(root.viewOnceMessageV2.message);
+    if (is.object(root?.viewOnceMessageV2Extension?.message)) return this.extractInboundMessageRoot(root.viewOnceMessageV2Extension.message);
+
+    return root;
   }
 
   private buildSpamPattern(
