@@ -29,3 +29,15 @@ export interface IMessage {
   contact?: IContact;
   options: any;
 }
+
+export interface IBlacklistUserPayload {
+  jid?: string;
+  lid?: string;
+  durationHours?: number;
+}
+
+export interface IBlockedUserItem {
+  jid: string;
+  blockedUntil: string;
+  remainingMs: number;
+}

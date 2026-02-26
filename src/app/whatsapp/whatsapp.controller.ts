@@ -5,7 +5,7 @@ import { Chat, Contact, WAPresence } from 'baileys';
 import { FastifyReply } from 'fastify';
 import { Observable, Subject } from 'rxjs';
 import { WebhookService } from '../webhook/webhook.service';
-import { IMessage, IReadMessages } from './whatsapp.interface';
+import { IBlacklistUserPayload, IMessage, IReadMessages } from './whatsapp.interface';
 import { WhatsappService } from './whatsapp.service';
 
 @ApiTags('WhatsApp')
@@ -91,6 +91,32 @@ export class WhatsappController {
     const shouldRecover = (recover || '').toLowerCase() === 'true' || recover === '1';
     if (shouldRecover) return await this.whatsapp.ensureConnected();
     return this.whatsapp.getConnectionHealth();
+  }
+
+  @Post('blacklist')
+  @ApiProduces('application/json')
+  @ApiConsumes('application/json')
+  controllerPostBlacklist(@Body() body: IBlacklistUserPayload): { jid: string; blockedUntil: string; durationHours: number } {
+    const jid = (body?.jid || body?.lid || '').trim();
+    const durationHoursRaw = Number(body?.durationHours);
+    const durationHours = Number.isFinite(durationHoursRaw) && durationHoursRaw > 0 ? durationHoursRaw : 6;
+    if (jid === '') throw new BadRequestException('jid is required. You can also provide "lid" as an alias.');
+    return this.whatsapp.setBlacklist(jid, durationHours);
+  }
+
+  @Get('blacklist')
+  @ApiProduces('application/json')
+  controllerGetBlacklist(): { count: number; items: Array<{ jid: string; blockedUntil: string; remainingMs: number }> } {
+    const items = this.whatsapp.getBlacklist();
+    return { count: items.length, items };
+  }
+
+  @Delete('blacklist/:jid')
+  @ApiProduces('application/json')
+  controllerDeleteBlacklist(@Param('jid') jid: string): { jid: string; removed: boolean } {
+    const value = decodeURIComponent((jid || '').trim());
+    if (value === '') throw new BadRequestException('jid is required.');
+    return this.whatsapp.removeBlacklist(value);
   }
 
   @Get('webhooks')

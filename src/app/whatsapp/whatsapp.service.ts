@@ -8,7 +8,7 @@ import { delay, is, to } from '@src/tools';
 import makeWASocket, { Browsers, CacheStore, Chat, ConnectionState, Contact, DisconnectReason, downloadMediaMessage, fetchLatestBaileysVersion, isJidBroadcast, isJidNewsletter, isJidStatusBroadcast, makeCacheableSignalKeyStore, useMultiFileAuthState, WACallEvent, WAMessageKey, WAPresence } from 'baileys';
 import P from 'pino';
 import { WebhookService } from '../webhook/webhook.service';
-import { IMessage, IReadMessages } from './whatsapp.interface';
+import { IBlockedUserItem, IMessage, IReadMessages } from './whatsapp.interface';
 const qrcode = require('qrcode-terminal');
 
 declare global {
@@ -365,7 +365,8 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                 if (this.isBlockedUser(from)) continue;
                 if (!this.isAuthorizedMessage(item)) continue;
                 const inboundPattern = this.buildInboundSpamPattern(item);
-                if (this.shouldBlockForRepeatedPattern(from, inboundPattern)) {
+                const observedAtMs = this.getMessageTimestampMs(item?.messageTimestamp) || Date.now();
+                if (this.shouldBlockForRepeatedPattern(from, inboundPattern, observedAtMs)) {
                   this.logger.warn(`Blocking sender for repeated pattern jid=${from}`);
                   continue;
                 }
@@ -509,6 +510,48 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
       this.logger.debug(e);
     }
     return {};
+  }
+
+  setBlacklist(jid: string, durationHours = 6): { jid: string; blockedUntil: string; durationHours: number } {
+    const normalizedJid = this.normalizeBlockKey(jid);
+    const hours = Number.isFinite(durationHours) && durationHours > 0 ? durationHours : 6;
+    const ttlMs = Math.round(hours * 60 * 60 * 1000);
+    if (normalizedJid === '') return { jid: '', blockedUntil: '', durationHours: hours };
+
+    const blockedUntilMs = Date.now() + ttlMs;
+    this.blockedUsers.set(normalizedJid, blockedUntilMs);
+    this.inboundPatternsBySender.delete(normalizedJid);
+    this.persistBlockedUsersToFile();
+
+    return {
+      jid: normalizedJid,
+      blockedUntil: new Date(blockedUntilMs).toISOString(),
+      durationHours: hours,
+    };
+  }
+
+  removeBlacklist(jid: string): { jid: string; removed: boolean } {
+    const normalizedJid = this.normalizeBlockKey(jid);
+    if (normalizedJid === '') return { jid: '', removed: false };
+
+    const removed = this.blockedUsers.delete(normalizedJid);
+    this.inboundPatternsBySender.delete(normalizedJid);
+    if (removed) this.persistBlockedUsersToFile();
+    return { jid: normalizedJid, removed };
+  }
+
+  getBlacklist(): IBlockedUserItem[] {
+    const now = Date.now();
+    if (this.pruneExpiredBlockedUsers(now)) this.persistBlockedUsersToFile();
+
+    return [...this.blockedUsers.entries()]
+      .filter(([, expiresAt]) => expiresAt > now)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([jid, expiresAt]) => ({
+        jid,
+        blockedUntil: new Date(expiresAt).toISOString(),
+        remainingMs: Math.max(0, expiresAt - now),
+      }));
   }
 
   private isConnectionClosedError(error: unknown): boolean {
@@ -1042,22 +1085,22 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
     return true;
   }
 
-  private shouldBlockForRepeatedPattern(jid: string, pattern: string): boolean {
+  private shouldBlockForRepeatedPattern(jid: string, pattern: string, observedAtMs = Date.now()): boolean {
     const normalizedJid = this.normalizeBlockKey(jid);
     if (normalizedJid === '' || pattern === '') return false;
     if (this.isBlockedUser(normalizedJid)) return true;
 
-    const now = Date.now();
-    const thresholdStart = now - this.spamDetectionWindowMs;
+    const safeObservedAtMs = Number.isFinite(observedAtMs) && observedAtMs > 0 ? observedAtMs : Date.now();
+    const thresholdStart = safeObservedAtMs - this.spamDetectionWindowMs;
     const currentHistory = this.inboundPatternsBySender.get(normalizedJid) || [];
     const nextHistory = currentHistory.filter((entry) => entry.timestamp >= thresholdStart);
-    nextHistory.push({ pattern, timestamp: now });
+    nextHistory.push({ pattern, timestamp: safeObservedAtMs });
     this.inboundPatternsBySender.set(normalizedJid, nextHistory);
 
     const repeatedCount = nextHistory.filter((entry) => entry.pattern === pattern).length;
     if (repeatedCount < this.spamDetectionThreshold) return false;
 
-    this.blockedUsers.set(normalizedJid, now + this.spamBlockDurationMs);
+    this.blockedUsers.set(normalizedJid, Date.now() + this.spamBlockDurationMs);
     this.inboundPatternsBySender.delete(normalizedJid);
     this.persistBlockedUsersToFile();
     return true;
