@@ -109,6 +109,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
   private currentClientId: string | null = null;
   private readonly autoRecoverEnabled = process.env.WHATSAPP_AUTO_RECOVER === undefined ? true : to.boolean(process.env.WHATSAPP_AUTO_RECOVER);
   private readonly autoRecoverIntervalMs = Math.max(5000, to.number(process.env.WHATSAPP_AUTO_RECOVER_INTERVAL_MS, 30000));
+  private readonly autoRejectCallsEnabled = process.env.WHATSAPP_AUTO_REJECT_CALLS === undefined ? true : to.boolean(process.env.WHATSAPP_AUTO_REJECT_CALLS);
   private readonly forcedRefreshEnabled = process.env.WHATSAPP_FORCE_REFRESH_ENABLED === undefined ? true : to.boolean(process.env.WHATSAPP_FORCE_REFRESH_ENABLED);
   private readonly forcedRefreshIntervalMs = Math.max(60_000, to.number(process.env.WHATSAPP_FORCE_REFRESH_INTERVAL_MS, 10 * 60 * 1000));
 
@@ -477,9 +478,21 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
    * Receive an update on a call, including when the call was received, rejected, accepted
    **/
   private onCall = async (call: WACallEvent) => {
-    try {
-      await this.client.rejectCall(call?.id, call?.from);
-    } catch (_e) {}
+    const updates = Array.isArray(call) ? call : [call];
+    if (this.autoRejectCallsEnabled && this.client) {
+      for (const update of updates) {
+        const status = to.string((update as any)?.status).toLowerCase();
+        const id = to.string((update as any)?.id);
+        const from = to.string((update as any)?.from);
+        if (status !== 'offer' || id === '' || from === '') continue;
+        try {
+          await this.client.rejectCall(id, from);
+        } catch (e) {
+          this.logger.debug(`Failed to reject call id=${id} from=${from}`);
+          this.logger.debug(e);
+        }
+      }
+    }
     const list: any = this.webhook.get();
     if (is.array(list)) this.webhook.send(list, { call });
   };

@@ -34,6 +34,7 @@ Auto-load webhook URLs at startup (optional):
 - `WHATSAPP_AUTO_RECOVER`: enable periodic reconnection attempts when the socket is down (default `true`)
 - `WHATSAPP_AUTO_RECOVER_INTERVAL_MS`: interval for auto-recovery checks (default 30000, min 5000)
 - `WHATSAPP_RECONNECT_MAX_DELAY_MS`: max backoff delay for internal reconnect loop (default 60000, min 10000)
+- `WHATSAPP_AUTO_REJECT_CALLS`: automatically reject incoming WhatsApp calls (default `true`)
 
 Example `.env`:
 
@@ -46,6 +47,7 @@ WEBHOOK_URLS=http://192.168.55.73:3350/receive-msg,http://127.0.0.1:3350/receive
 # WHATSAPP_AUTO_RECOVER=true
 # WHATSAPP_AUTO_RECOVER_INTERVAL_MS=30000
 # WHATSAPP_RECONNECT_MAX_DELAY_MS=60000
+# WHATSAPP_AUTO_REJECT_CALLS=true
 ```
 
 <br/>
