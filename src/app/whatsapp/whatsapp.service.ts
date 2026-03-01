@@ -389,14 +389,14 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                 const media = { mimeType, caption: '', base64: '', fileName: '' };
                 if (mimeType !== '' || hasDocumentMessage) {
                   type = this.getMediaType(item);
-                  if (type === 'audio' || type === 'document') {
+                  if (type === 'audio' || type === 'document' || type === 'image' || type === 'video') {
                     const mediaBuffer = await downloadMediaMessage(item, 'buffer', {});
                     media.caption = this.getMediaCaption(item);
                     media.fileName = this.getMediaFileName(item);
                     media.base64 = mediaBuffer.toString('base64');
                   }
                 }
-                if (type !== 'text' && type !== 'audio' && type !== 'document' && type !== 'location') {
+                if (type !== 'text' && type !== 'audio' && type !== 'document' && type !== 'image' && type !== 'video' && type !== 'location') {
                   this.logger.debug(`Skipping unsupported inbound type=${type}`);
                   continue;
                 }
@@ -404,7 +404,7 @@ export class WhatsappService implements OnModuleInit, OnModuleDestroy {
                 // Webhook
                 const replyId = this.getReplyId(item);
                 const webhookPayload: Record<string, any> =
-                  type === 'audio' || type === 'document'
+                  type === 'audio' || type === 'document' || type === 'image' || type === 'video'
                     ? {
                         from,
                         type,
